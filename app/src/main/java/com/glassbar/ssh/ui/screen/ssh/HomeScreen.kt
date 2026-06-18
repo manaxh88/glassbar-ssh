@@ -78,7 +78,7 @@ fun HomeScreen(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                text = "SSH Connections",
+                text = "SSH 连接",
                 fontSize = 20.sp,
                 fontWeight = FontWeight.Bold,
                 color = LightText,
@@ -89,12 +89,12 @@ fun HomeScreen(
             ) {
                 Icon(
                     imageVector = Icons.Rounded.Add,
-                    contentDescription = "Add",
+                    contentDescription = "添加",
                     tint = Color.White,
                     modifier = Modifier.size(18.dp),
                 )
                 Spacer(Modifier.width(4.dp))
-                Text("Add", color = Color.White, fontSize = 13.sp)
+                Text("添加", color = Color.White, fontSize = 13.sp)
             }
         }
 
@@ -111,9 +111,9 @@ fun HomeScreen(
                         modifier = Modifier.size(64.dp),
                     )
                     Spacer(Modifier.height(16.dp))
-                    Text("No SSH connections", color = LightTextSecondary, fontSize = 16.sp)
+                    Text("暂无 SSH 连接", color = LightTextSecondary, fontSize = 16.sp)
                     Spacer(Modifier.height(8.dp))
-                    Text("Tap Add to create one", color = Color(0xFFAAAAAA), fontSize = 13.sp)
+                    Text("点击添加创建连接", color = Color(0xFFAAAAAA), fontSize = 13.sp)
                 }
             }
         } else {
@@ -159,7 +159,7 @@ fun HomeScreen(
                                 onClick = { onConnect(conn) },
                                 modifier = Modifier.height(34.dp),
                             ) {
-                                Text("Connect", color = Color.White, fontSize = 12.sp)
+                                Text("连接", color = Color.White, fontSize = 12.sp)
                             }
                             Spacer(Modifier.width(8.dp))
                             Icon(
@@ -241,7 +241,7 @@ private fun AddEditDialog(
                 .padding(20.dp),
         ) {
             Text(
-                text = if (isEdit) "Edit Connection" else "New Connection",
+                text = if (isEdit) "编辑连接" else "新建连接",
                 color = LightText,
                 fontSize = 18.sp,
                 fontWeight = FontWeight.Bold,
@@ -249,33 +249,33 @@ private fun AddEditDialog(
             )
             TextField(
                 value = name, onValueChange = { name = it },
-                label = "Name (optional)", useLabelAsPlaceholder = true,
+                label = "名称（选填）", useLabelAsPlaceholder = true,
                 modifier = Modifier.fillMaxWidth(),
             )
             Spacer(Modifier.height(10.dp))
             TextField(
                 value = host, onValueChange = { host = it },
-                label = "Host", useLabelAsPlaceholder = true,
+                label = "主机", useLabelAsPlaceholder = true,
                 modifier = Modifier.fillMaxWidth(),
             )
             Spacer(Modifier.height(10.dp))
             Row(modifier = Modifier.fillMaxWidth()) {
                 TextField(
                     value = port, onValueChange = { port = it.filter { c -> c.isDigit() } },
-                    label = "Port", useLabelAsPlaceholder = true,
+                    label = "端口", useLabelAsPlaceholder = true,
                     modifier = Modifier.weight(0.4f),
                 )
                 Spacer(Modifier.width(10.dp))
                 TextField(
                     value = username, onValueChange = { username = it },
-                    label = "Username", useLabelAsPlaceholder = true,
+                    label = "用户名", useLabelAsPlaceholder = true,
                     modifier = Modifier.weight(0.6f),
                 )
             }
             Spacer(Modifier.height(10.dp))
             TextField(
                 value = password, onValueChange = { password = it },
-                label = "Password", useLabelAsPlaceholder = true,
+                label = "密码", useLabelAsPlaceholder = true,
                 modifier = Modifier.fillMaxWidth(),
             )
             Spacer(Modifier.height(20.dp))
@@ -284,7 +284,7 @@ private fun AddEditDialog(
                 horizontalArrangement = Arrangement.End,
             ) {
                 BlueButton(onClick = onDismiss, modifier = Modifier.height(40.dp), enabled = true) {
-                    Text("Cancel", color = Color.White, fontSize = 13.sp)
+                    Text("取消", color = Color.White, fontSize = 13.sp)
                 }
                 Spacer(Modifier.width(10.dp))
                 BlueButton(
@@ -300,7 +300,7 @@ private fun AddEditDialog(
                     modifier = Modifier.height(40.dp),
                     enabled = host.isNotBlank() && username.isNotBlank(),
                 ) {
-                    Text("Save", color = Color.White, fontSize = 13.sp)
+                    Text("保存", color = Color.White, fontSize = 13.sp)
                 }
             }
         }

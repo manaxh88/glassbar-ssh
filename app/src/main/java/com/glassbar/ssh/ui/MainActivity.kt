@@ -60,9 +60,9 @@ import com.glassbar.ssh.ui.util.rememberContentReady
 import com.glassbar.ssh.ui.viewmodel.MainActivityViewModel
 import com.glassbar.ssh.ui.viewmodel.MainPagerConfig
 import top.yukonga.miuix.kmp.basic.Scaffold
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.blur.layerBackdrop
 import top.yukonga.miuix.kmp.blur.rememberLayerBackdrop
-import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 class MainActivity : ComponentActivity() {
 
@@ -140,7 +140,7 @@ class MainActivity : ComponentActivity() {
                         )
                     }
 
-                    Scaffold { navDisplay() }
+                    Scaffold(containerColor = MiuixTheme.colorScheme.surfaceContainer) { navDisplay() }
                 }
             }
         }
@@ -232,7 +232,7 @@ fun MainScreen(
             }
         }
 
-        Scaffold(bottomBar = bottomBar) { innerPadding ->
+        Scaffold(bottomBar = bottomBar, containerColor = MiuixTheme.colorScheme.surfaceContainer) { innerPadding ->
             Box(
                 modifier = Modifier.padding(top = innerPadding.calculateTopPadding())
             ) {

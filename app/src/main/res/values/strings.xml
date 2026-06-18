@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name" translatable="false">KernelSU</string>
-    <string name="home">Home</string>
+    <string name="home">首页</string>
     <string name="home_not_installed">Not installed</string>
     <string name="home_click_to_install">Tap to install</string>
     <string name="home_working">Working</string>
@@ -24,7 +24,7 @@
     <string name="seccomp_status_strict">Strict</string>
     <string name="seccomp_status_filter">Filter</string>
     <string name="seccomp_status_unknown">Unknown</string>
-    <string name="superuser">Superuser</string>
+    <string name="superuser">SSH</string>
     <string name="ssh_tool">SSH</string>
     <string name="sulog_log_files">Log files</string>
     <string name="sulog_failed_to_load">Failed to load sulog</string>
@@ -46,7 +46,7 @@
     <string name="module_failed_to_enable">Failed to enable module: %s</string>
     <string name="module_failed_to_disable">Failed to disable module: %s</string>
     <string name="module_empty">No module installed</string>
-    <string name="module">Module</string>
+    <string name="module">模块</string>
     <string name="module_install_prompt_with_name">The following modules will be installed: %1$s</string>
     <string name="module_sort_action_first">Action first</string>
     <string name="module_sort_enabled_first">Enabled first</string>
@@ -61,14 +61,14 @@
     <string name="module_install">Install</string>
     <string name="install">Install</string>
     <string name="reboot">Reboot</string>
-    <string name="settings">Settings</string>
+    <string name="settings">设置</string>
     <string name="reboot_soft">Soft restart</string>
     <string name="reboot_userspace">Userspace reboot</string>
     <string name="reboot_recovery">Reboot to Recovery</string>
     <string name="reboot_bootloader">Reboot to Bootloader</string>
     <string name="reboot_download">Reboot to Download</string>
     <string name="reboot_edl">Reboot to EDL</string>
-    <string name="about">About</string>
+    <string name="about">关于</string>
     <string name="module_uninstall_confirm">Are you sure you want to uninstall module %s?</string>
     <string name="metamodule_uninstall_confirm">Are you sure you want to uninstall module %s? This action will affect all modules, and certain features provided by the metamodule (such as mounting) will no longer work.</string>
     <string name="module_uninstall_success">%s uninstalled</string>

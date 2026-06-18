@@ -9,20 +9,31 @@ import android.view.View
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import kotlinx.coroutines.delay
 
@@ -67,6 +78,10 @@ fun TerminalView(
         terminalView.invalidate()
     }
 
+    // Text field to capture software keyboard input
+    var imeText by remember { mutableStateOf("") }
+    val imeFocusRequester = remember { FocusRequester() }
+
     Box(
         modifier = modifier
             .focusRequester(focusRequester)
@@ -80,11 +95,45 @@ fun TerminalView(
                         true
                     } else false
                 } else false
-            }
+            },
     ) {
+        // Terminal canvas
         AndroidView(
             factory = { terminalView },
             modifier = Modifier.fillMaxSize().padding(3.dp),
+        )
+
+        // IME input bar at bottom
+        BasicTextField(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .focusRequester(imeFocusRequester)
+                .clickable { imeFocusRequester.requestFocus() },
+            value = imeText,
+            onValueChange = { newText ->
+                if (newText.length > imeText.length) {
+                    val ch = newText.substring(imeText.length)
+                    onKeyEvent(ch)
+                } else if (newText.length < imeText.length) {
+                    // Backspace handled by hardware key event
+                }
+                imeText = newText
+                // Auto-clear after accumulation
+                if (imeText.length > 80) imeText = ""
+            },
+            textStyle = TextStyle(color = Color(0xFF1A1A1A), fontSize = 16.sp),
+            singleLine = true,
+            decorationBox = { inner ->
+                androidx.compose.foundation.layout.Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Color.White.copy(alpha = 0.9f))
+                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                ) {
+                    inner()
+                }
+            },
         )
     }
 }
@@ -112,15 +161,14 @@ private class TerminalNativeView(
         val canvasHeight = height.toFloat()
         if (canvasWidth <= 0 || canvasHeight <= 0) return
 
-        // Calculate cell size to fit both dimensions
-        textPaint.textSize = canvasHeight / buffer.rows
+        // Calculate cell size — fixed font, width-constrained
+        textPaint.textSize = 36f
         var cellW = textPaint.measureText("M")
-        val neededWidth = cellW * buffer.cols
-        if (neededWidth > canvasWidth) {
-            textPaint.textSize = canvasWidth / buffer.cols
+        if (cellW * buffer.cols > canvasWidth) {
+            textPaint.textSize = (canvasWidth / buffer.cols) * 0.96f
+            cellW = textPaint.measureText("M")
         }
-        cellW = textPaint.measureText("M")
-        val cellH = canvasHeight / buffer.rows
+        val cellH = textPaint.textSize * 1.05f
 
         // Background is provided by parent — do not draw
 
@@ -133,7 +181,7 @@ private class TerminalNativeView(
                 if (cell.char == ' ') continue
 
                 val x = c * cellW
-                val baseline = r * cellH - textPaint.ascent() * 0.9f
+                val baseline = r * cellH - textPaint.ascent() * 0.95f
 
                 // Cell background
                 if (cell.bg != TerminalColors.DEFAULT_BG) {

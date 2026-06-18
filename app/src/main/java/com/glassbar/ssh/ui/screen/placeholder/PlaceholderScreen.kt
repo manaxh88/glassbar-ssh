@@ -15,6 +15,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import top.yukonga.miuix.kmp.basic.Icon
@@ -56,7 +57,7 @@ fun PlaceholderScreen(
             color = MiuixTheme.colorScheme.onSurface,
         )
         Text(
-            text = "Glass Bottom Bar Demo",
+            text = "GlassBar SSH 工具",
             fontSize = 14.sp,
             color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
             modifier = Modifier.padding(top = 8.dp),

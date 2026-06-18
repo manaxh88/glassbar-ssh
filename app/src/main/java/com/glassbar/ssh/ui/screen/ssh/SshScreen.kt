@@ -28,6 +28,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
@@ -54,6 +55,7 @@ fun SshScreen(
     onConsumed: () -> Unit = {},
 ) {
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
     val focusManager = LocalFocusManager.current
 
     var host by remember { mutableStateOf(initialConnection?.host ?: "") }
@@ -61,7 +63,7 @@ fun SshScreen(
     var username by remember { mutableStateOf(initialConnection?.username ?: "") }
     var password by remember { mutableStateOf(initialConnection?.password ?: "") }
 
-    val terminalBuffer = remember { TerminalBuffer(rows = 30, cols = 50) }
+    val terminalBuffer = remember { TerminalBuffer(rows = 18, cols = 50) }
     val sshSession = remember { SshSession(terminalBuffer) }
     val connectionState by sshSession.state.collectAsStateWithLifecycle()
     val errorMessage by sshSession.errorMessage.collectAsStateWithLifecycle()
@@ -123,7 +125,7 @@ fun SshScreen(
                     .verticalScroll(rememberScrollState()),
             ) {
                 Text(
-                    text = "SSH Connection",
+                    text = "SSH 连接",
                     fontSize = 20.sp,
                     fontWeight = FontWeight.Bold,
                     color = LightText,
@@ -133,7 +135,7 @@ fun SshScreen(
                 TextField(
                     value = host, onValueChange = { host = it },
                     modifier = Modifier.fillMaxWidth(),
-                    label = "Host", useLabelAsPlaceholder = true,
+                    label = "主机", useLabelAsPlaceholder = true,
                     keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = ImeAction.Next),
                 )
                 Spacer(Modifier.height(12.dp))
@@ -142,7 +144,7 @@ fun SshScreen(
                     Column(modifier = Modifier.weight(0.35f)) {
                         TextField(
                             value = port, onValueChange = { port = it.filter { c -> c.isDigit() } },
-                            label = "Port", useLabelAsPlaceholder = true,
+                            label = "端口", useLabelAsPlaceholder = true,
                             keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
                                 keyboardType = KeyboardType.Number, imeAction = ImeAction.Next,
                             ),
@@ -152,7 +154,7 @@ fun SshScreen(
                     Column(modifier = Modifier.weight(0.65f)) {
                         TextField(
                             value = username, onValueChange = { username = it },
-                            label = "Username", useLabelAsPlaceholder = true,
+                            label = "用户名", useLabelAsPlaceholder = true,
                             keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = ImeAction.Next),
                         )
                     }
@@ -162,7 +164,7 @@ fun SshScreen(
                 TextField(
                     value = password, onValueChange = { password = it },
                     modifier = Modifier.fillMaxWidth(),
-                    label = "Password", useLabelAsPlaceholder = true,
+                    label = "密码", useLabelAsPlaceholder = true,
                     keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
                         keyboardType = KeyboardType.Password, imeAction = ImeAction.Done,
                     ),
@@ -175,7 +177,30 @@ fun SshScreen(
                     enabled = host.isNotBlank() && username.isNotBlank() && !isConnecting,
                 ) {
                     Text(
-                        text = if (isConnecting) "Connecting..." else "Connect",
+                        text = if (isConnecting) "连接中..." else "连接",
+                        color = Color.White, fontWeight = FontWeight.Bold,
+                    )
+                }
+
+                Spacer(Modifier.height(10.dp))
+
+                BlueButton(
+                    onClick = {
+                        val conn = SshConnectionInfo(
+                            name = "",
+                            host = host.trim(),
+                            port = port.toIntOrNull() ?: 22,
+                            username = username.trim(),
+                            password = password,
+                        )
+                        SshConnectionStore.add(context, conn)
+                        doConnect()
+                    },
+                    modifier = Modifier.fillMaxWidth().height(48.dp),
+                    enabled = host.isNotBlank() && username.isNotBlank() && !isConnecting,
+                ) {
+                    Text(
+                        text = "保存并连接",
                         color = Color.White, fontWeight = FontWeight.Bold,
                     )
                 }
@@ -189,7 +214,7 @@ fun SshScreen(
                 }
 
                 Spacer(Modifier.height(24.dp))
-                Text("Quick Tips", color = LightTextSecondary, fontSize = 12.sp, modifier = Modifier.padding(bottom = 8.dp))
+                Text("使用提示", color = LightTextSecondary, fontSize = 12.sp, modifier = Modifier.padding(bottom = 8.dp))
                 Text(
                     "  Connect to SSH servers\n  Use hardware keyboard for terminal input\n  Ctrl+C/D/Z shortcuts supported\n  Arrow keys for navigation",
                     color = Color(0xFFAAAAAA), fontSize = 12.sp, lineHeight = 18.sp,
@@ -227,7 +252,7 @@ fun SshScreen(
                         onClick = { sshSession.disconnect() },
                         modifier = Modifier.height(32.dp),
                     ) {
-                        Text("Disconnect", fontSize = 12.sp, color = Color.White)
+                        Text("断开", fontSize = 12.sp, color = Color.White)
                     }
                 }
 
