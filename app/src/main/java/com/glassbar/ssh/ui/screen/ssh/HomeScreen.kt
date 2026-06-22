@@ -20,6 +20,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Computer
+import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -155,6 +156,18 @@ fun HomeScreen(
                                     overflow = TextOverflow.Ellipsis,
                                 )
                             }
+                            Icon(
+                                imageVector = Icons.Rounded.Edit,
+                                contentDescription = "编辑",
+                                tint = Color(0xFF1976D2),
+                                modifier = Modifier
+                                    .size(22.dp)
+                                    .clickable {
+                                        editingConnection = conn
+                                        showAddDialog = true
+                                    },
+                            )
+                            Spacer(Modifier.width(10.dp))
                             BlueButton(
                                 onClick = { onConnect(conn) },
                                 modifier = Modifier.height(34.dp),
