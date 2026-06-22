@@ -213,6 +213,72 @@ fun HomeScreen(
             },
         )
     }
+
+    // Delete confirmation dialog
+    if (deleteTarget != null) {
+        val conn = deleteTarget!!
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.4f))
+                .clickable(
+                    interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                    indication = null,
+                    onClick = { deleteTarget = null }
+                ),
+            contentAlignment = Alignment.Center,
+        ) {
+            Column(
+                modifier = Modifier
+                    .padding(horizontal = 48.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(MiuixTheme.colorScheme.surfaceContainer)
+                    .clickable(
+                        interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                        indication = null,
+                        onClick = {}
+                    )
+                    .padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Text(
+                    "确认删除？",
+                    color = LightText,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold,
+                )
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    conn.name.ifBlank { "${conn.username}@${conn.host}" },
+                    color = LightTextSecondary,
+                    fontSize = 14.sp,
+                )
+                Spacer(Modifier.height(20.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceEvenly,
+                ) {
+                    BlueButton(
+                        onClick = { deleteTarget = null },
+                        modifier = Modifier.height(40.dp).weight(1f),
+                    ) {
+                        Text("取消", color = Color.White, fontSize = 13.sp)
+                    }
+                    Spacer(Modifier.width(12.dp))
+                    BlueButton(
+                        onClick = {
+                            SshConnectionStore.delete(context, conn.id)
+                            deleteTarget = null
+                            refreshList()
+                        },
+                        modifier = Modifier.height(40.dp).weight(1f),
+                    ) {
+                        Text("确认", color = Color.White, fontSize = 13.sp)
+                    }
+                }
+            }
+        }
+    }
     }
 }
 
@@ -318,4 +384,6 @@ private fun AddEditDialog(
             }
         }
     }
+
+
 }
