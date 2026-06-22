@@ -168,16 +168,9 @@ fun HomeScreen(
                                     },
                             )
                             Spacer(Modifier.width(10.dp))
-                            BlueButton(
-                                onClick = { onConnect(conn) },
-                                modifier = Modifier.height(34.dp),
-                            ) {
-                                Text("连接", color = Color.White, fontSize = 12.sp)
-                            }
-                            Spacer(Modifier.width(8.dp))
                             Icon(
                                 imageVector = Icons.Rounded.Delete,
-                                contentDescription = "Delete",
+                                contentDescription = "删除",
                                 tint = Color(0xFFBBBBBB),
                                 modifier = Modifier
                                     .size(20.dp)
@@ -186,6 +179,13 @@ fun HomeScreen(
                                         refreshList()
                                     },
                             )
+                            Spacer(Modifier.width(8.dp))
+                            BlueButton(
+                                onClick = { onConnect(conn) },
+                                modifier = Modifier.height(34.dp),
+                            ) {
+                                Text("连接", color = Color.White, fontSize = 12.sp)
+                            }
                         }
                     }
                 }
