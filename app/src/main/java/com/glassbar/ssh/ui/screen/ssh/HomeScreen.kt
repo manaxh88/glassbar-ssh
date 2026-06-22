@@ -58,6 +58,7 @@ fun HomeScreen(
     var connections by remember { mutableStateOf(SshConnectionStore.getAll(context)) }
     var showAddDialog by remember { mutableStateOf(false) }
     var editingConnection by remember { mutableStateOf<SshConnectionInfo?>(null) }
+    var deleteTarget by remember { mutableStateOf<SshConnectionInfo?>(null) }
 
     val refreshList: () -> Unit = {
         connections = SshConnectionStore.getAll(context)
@@ -175,8 +176,7 @@ fun HomeScreen(
                                 modifier = Modifier
                                     .size(20.dp)
                                     .clickable {
-                                        SshConnectionStore.delete(context, conn.id)
-                                        refreshList()
+                                        deleteTarget = conn
                                     },
                             )
                             Spacer(Modifier.width(8.dp))
