@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.YellowApp" parent="Theme.AppCompat.Light.NoActionBar">
+        <item name="android:windowBackground">#FFEB3B</item>
+        <item name="colorPrimary">#FBC02D</item>
+        <item name="colorPrimaryDark">#F57F17</item>
+        <item name="colorAccent">#FFC107</item>
+    </style>
+</resources>

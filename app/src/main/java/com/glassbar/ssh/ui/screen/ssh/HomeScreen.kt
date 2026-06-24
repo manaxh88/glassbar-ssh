@@ -340,7 +340,12 @@ private fun AddEditDialog(
     var host by remember { mutableStateOf(existing?.host ?: "") }
     var port by remember { mutableStateOf((existing?.port ?: 22).toString()) }
     var username by remember { mutableStateOf(existing?.username ?: "") }
-    var password by remember { mutableStateOf(existing?.password ?: "") }
+    val savedPassword = existing?.password ?: ""
+    var passwordDisplay by remember { mutableStateOf(if (savedPassword.isNotEmpty()) "********" else "") }
+    var passwordEdited by remember { mutableStateOf(false) }
+
+    fun getActualPassword(): String =
+        if (passwordEdited) passwordDisplay else savedPassword
 
     Box(
         modifier = Modifier
@@ -400,7 +405,10 @@ private fun AddEditDialog(
             }
             Spacer(Modifier.height(10.dp))
             TextField(
-                value = password, onValueChange = { password = it },
+                value = passwordDisplay, onValueChange = {
+                    passwordDisplay = it
+                    passwordEdited = true
+                },
                 label = "密码", useLabelAsPlaceholder = true,
                 modifier = Modifier.fillMaxWidth(),
             )
@@ -419,7 +427,7 @@ private fun AddEditDialog(
                             id = existing?.id ?: kotlin.random.Random.nextLong().toString(36),
                             name = name.trim(), host = host.trim(),
                             port = port.toIntOrNull() ?: 22, username = username.trim(),
-                            password = password,
+                            password = getActualPassword(),
                         )
                         onSave(conn)
                     },
