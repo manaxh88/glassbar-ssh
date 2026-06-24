@@ -22,6 +22,7 @@ import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Computer
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -39,6 +40,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.glassbar.ssh.ui.component.CircularChart
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
 import top.yukonga.miuix.kmp.basic.Button
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.Icon
@@ -64,6 +66,17 @@ fun HomeScreen(
     var editingConnection by remember { mutableStateOf<SshConnectionInfo?>(null) }
     var deleteTarget by remember { mutableStateOf<SshConnectionInfo?>(null) }
     var serverStats by remember { mutableStateOf<Map<String, ServerStats>>(emptyMap()) }
+
+    // Auto-refresh server stats every 10 seconds
+    LaunchedEffect(connections) {
+        while (true) {
+            connections.filter { it.password.isNotBlank() }.forEach { conn ->
+                val s = StatsFetcher.fetch(conn.host, conn.port, conn.username, conn.password)
+                serverStats = serverStats + (conn.id to s)
+            }
+            delay(10_000)
+        }
+    }
 
     val refreshList: () -> Unit = {
         connections = SshConnectionStore.getAll(context)
