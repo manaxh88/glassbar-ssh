@@ -112,8 +112,14 @@ fun TerminalView(
             value = imeText,
             onValueChange = { newText ->
                 if (newText.length > imeText.length) {
-                    val ch = newText.substring(imeText.length)
-                    onKeyEvent(ch)
+                    val added = newText.substring(imeText.length)
+                    // If Enter/newline pressed, send CR and clear
+                    if (added.contains("\n")) {
+                        onKeyEvent(imeText + "\r")
+                        imeText = ""
+                        return@BasicTextField
+                    }
+                    onKeyEvent(added)
                 }
                 imeText = newText
                 if (imeText.length > 80) imeText = ""
