@@ -79,9 +79,6 @@ class SshSession(
             val inputStream = channel?.inputStream
                 ?: throw Exception("Failed to get input stream")
 
-            // Test: write directly to buffer to verify data flow
-            terminalBuffer.write("CONNECTED\n".toByteArray())
-
             // Start read thread
             readThread = Thread {
                 try {
