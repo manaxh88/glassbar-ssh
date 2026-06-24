@@ -53,17 +53,23 @@ fun TerminalView(
     focusRequester: FocusRequester = remember { FocusRequester() },
 ) {
     val context = LocalContext.current
-    var refreshTrigger by remember { mutableIntStateOf(0) }
+    var cursorTick by remember { mutableIntStateOf(0) }
+
+    val terminalView = remember { TerminalNativeView(context, buffer) }
 
     LaunchedEffect(buffer) {
-        buffer.addChangeListener { refreshTrigger++ }
+        buffer.addChangeListener { terminalView.postInvalidate() }
     }
 
     LaunchedEffect(Unit) {
         while (true) {
             delay(530)
-            refreshTrigger++
+            cursorTick++
         }
+    }
+
+    LaunchedEffect(cursorTick) {
+        terminalView.invalidate()
     }
 
     LaunchedEffect(focusRequester) {
@@ -71,15 +77,9 @@ fun TerminalView(
         focusRequester.requestFocus()
     }
 
-    val terminalView = remember { TerminalNativeView(context, buffer) }
-
     DisposableEffect(Unit) {
         terminalView.keyListener = onKeyEvent
         onDispose { terminalView.keyListener = {} }
-    }
-
-    LaunchedEffect(refreshTrigger) {
-        terminalView.invalidate()
     }
 
     // Text field to capture software keyboard input
