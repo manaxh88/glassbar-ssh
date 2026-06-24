@@ -7,6 +7,7 @@ import android.graphics.Typeface
 import android.view.KeyEvent
 import android.view.View
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
@@ -60,7 +61,10 @@ fun TerminalView(
         terminalView.requestFocus()
     }
 
-    Box(modifier = modifier) {
+    Box(
+        modifier = modifier
+            .clickable { terminalView.requestFocus() }
+    ) {
         AndroidView(
             factory = { terminalView },
             modifier = Modifier.fillMaxSize().padding(3.dp),
@@ -78,6 +82,14 @@ private class TerminalNativeView(
     init {
         isFocusable = true
         isFocusableInTouchMode = true
+        setOnFocusChangeListener { _, hasFocus ->
+            val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager
+            if (hasFocus) {
+                imm.showSoftInput(this, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT)
+            } else {
+                imm.hideSoftInputFromWindow(windowToken, 0)
+            }
+        }
     }
 
     override fun onCheckIsTextEditor(): Boolean = true
