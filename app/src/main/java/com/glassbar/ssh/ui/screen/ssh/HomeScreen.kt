@@ -21,10 +21,12 @@ import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Computer
 import androidx.compose.material.icons.rounded.Edit
+import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -36,6 +38,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.glassbar.ssh.ui.component.CircularChart
+import kotlinx.coroutines.launch
 import top.yukonga.miuix.kmp.basic.Button
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.Icon
@@ -55,10 +59,12 @@ fun HomeScreen(
     onConnect: (SshConnectionInfo) -> Unit = {},
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     var connections by remember { mutableStateOf(SshConnectionStore.getAll(context)) }
     var showAddDialog by remember { mutableStateOf(false) }
     var editingConnection by remember { mutableStateOf<SshConnectionInfo?>(null) }
     var deleteTarget by remember { mutableStateOf<SshConnectionInfo?>(null) }
+    var serverStats by remember { mutableStateOf<Map<String, ServerStats>>(emptyMap()) }
 
     val refreshList: () -> Unit = {
         connections = SshConnectionStore.getAll(context)
@@ -136,7 +142,7 @@ fun HomeScreen(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .background(LightCardBg)
-                                .padding(16.dp),
+                                .padding(12.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Column(modifier = Modifier.weight(1f)) {
@@ -156,6 +162,29 @@ fun HomeScreen(
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
                                 )
+                            }
+                            // Server stats charts
+                            val stats = serverStats[conn.id]
+                            if (stats != null && stats.error == null) {
+                                CircularChart(value = stats.cpuPercent, color = Color(0xFF4CAF50), label = "CPU")
+                                Spacer(Modifier.width(8.dp))
+                                CircularChart(value = stats.memPercent, color = Color(0xFF2196F3), label = "内存")
+                                Spacer(Modifier.width(8.dp))
+                            } else {
+                                Icon(
+                                    imageVector = Icons.Rounded.Refresh,
+                                    contentDescription = "刷新",
+                                    tint = Color(0xFF1976D2),
+                                    modifier = Modifier
+                                        .size(18.dp)
+                                        .clickable {
+                                            scope.launch {
+                                                val s = StatsFetcher.fetch(conn.host, conn.port, conn.username, conn.password)
+                                                serverStats = serverStats + (conn.id to s)
+                                            }
+                                        },
+                                )
+                                Spacer(Modifier.width(10.dp))
                             }
                             Icon(
                                 imageVector = Icons.Rounded.Edit,
