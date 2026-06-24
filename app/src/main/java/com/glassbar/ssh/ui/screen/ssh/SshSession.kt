@@ -39,7 +39,7 @@ class SshSession(
     private val _errorMessage = MutableStateFlow<String?>(null)
     val errorMessage: StateFlow<String?> = _errorMessage.asStateFlow()
 
-    private val ioScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private var ioScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     private var session: Session? = null
     private var channel: ChannelShell? = null
@@ -153,6 +153,7 @@ class SshSession(
 
     fun disconnect() {
         ioScope.cancel()
+        ioScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
         readThread?.interrupt()
         readThread = null
         try {
