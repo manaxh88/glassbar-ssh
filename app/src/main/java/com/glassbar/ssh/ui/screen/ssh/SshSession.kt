@@ -95,7 +95,7 @@ class SshSession(
                         val n = reader.read(buf)
                         if (n == -1) break
                         val str = String(buf, 0, n)
-                        terminalBuffer.write(str.toByteArray())
+                        terminalBuffer.write(str)
                     }
                 } catch (e: InterruptedException) {
                     terminalBuffer.write(" [EOF]\n".toByteArray())

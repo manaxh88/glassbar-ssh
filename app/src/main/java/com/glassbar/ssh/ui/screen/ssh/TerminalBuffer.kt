@@ -106,6 +106,23 @@ class TerminalBuffer(
     fun write(data: ByteArray) = write(data, 0, data.size)
 
     /**
+     * Write a String, handling multi-byte UTF-8 characters directly.
+     * Non-ASCII characters (code > 127) skip ANSI parsing and are placed on screen directly.
+     */
+    fun write(text: String) {
+        for (ch in text) {
+            if (ch.code > 127) {
+                // Wide character (e.g. Chinese) — place directly without ANSI parsing
+                putChar(ch)
+            } else {
+                // ASCII or control character — run through ANSI state machine
+                processByte(ch.code)
+            }
+        }
+        notifyChange()
+    }
+
+    /**
      * Get the visible region (the rows currently displayed on screen).
      */
     fun visibleRows(): List<Array<TerminalCell>> {
