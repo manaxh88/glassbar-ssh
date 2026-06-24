@@ -38,7 +38,12 @@ fun TerminalView(
     var cursorTick by remember { mutableIntStateOf(0) }
 
     val terminalView = remember {
-        TerminalNativeView(context, buffer).also { it.keyListener = onKeyEvent }
+        TerminalNativeView(context, buffer)
+    }
+
+    DisposableEffect(onKeyEvent) {
+        terminalView.keyListener = onKeyEvent
+        onDispose { }
     }
 
     LaunchedEffect(buffer) {
@@ -101,11 +106,11 @@ private class TerminalNativeView(
         return object : android.view.inputmethod.BaseInputConnection(this, false) {
             override fun commitText(text: CharSequence?, newCursorPosition: Int): Boolean {
                 text?.let { keyListener(it.toString()) }
-                return true
+                return super.commitText(text, newCursorPosition)
             }
             override fun setComposingText(text: CharSequence?, newCursorPosition: Int): Boolean {
                 text?.let { keyListener(it.toString()) }
-                return true
+                return super.setComposingText(text, newCursorPosition)
             }
             override fun deleteSurroundingText(beforeLength: Int, afterLength: Int): Boolean {
                 if (beforeLength > 0) keyListener("\u007F")
