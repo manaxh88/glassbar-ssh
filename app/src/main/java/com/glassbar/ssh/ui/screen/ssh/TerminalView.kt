@@ -172,10 +172,10 @@ private class TerminalNativeView(
         val canvasHeight = height.toFloat()
         if (canvasWidth <= 0 || canvasHeight <= 0) return
 
-        textPaint.textSize = canvasHeight / buffer.rows * 0.85f
+        textPaint.textSize = canvasHeight / buffer.rows * 0.92f
         var cellW = textPaint.measureText("M")
         if (cellW * buffer.cols > canvasWidth) {
-            textPaint.textSize = canvasWidth / buffer.cols * 0.92f
+            textPaint.textSize = canvasWidth / buffer.cols * 0.96f
             cellW = textPaint.measureText("M")
         }
         val cellH = canvasHeight / buffer.rows
