@@ -38,12 +38,9 @@ fun TerminalView(
     var cursorTick by remember { mutableIntStateOf(0) }
 
     val terminalView = remember {
-        TerminalNativeView(context, buffer)
-    }
-
-    DisposableEffect(onKeyEvent) {
-        terminalView.keyListener = onKeyEvent
-        onDispose { }
+        TerminalNativeView(context, buffer).also {
+            it.keyListener = onKeyEvent
+        }
     }
 
     LaunchedEffect(buffer) {
@@ -160,6 +157,12 @@ private class TerminalNativeView(
         val canvasWidth = width.toFloat()
         val canvasHeight = height.toFloat()
         if (canvasWidth <= 0 || canvasHeight <= 0) return
+
+        // Debug: draw a test line to verify rendering
+        textPaint.textSize = 36f
+        textPaint.color = android.graphics.Color.RED
+        canvas.drawText("TEST", 10f, 50f, textPaint)
+        textPaint.color = TermFg
 
         textPaint.textSize = 36f
         var cellW = textPaint.measureText("M")
