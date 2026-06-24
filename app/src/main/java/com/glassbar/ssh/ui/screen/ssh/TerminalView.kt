@@ -116,7 +116,8 @@ private class TerminalNativeView(
                 return true
             }
             override fun sendKeyEvent(event: KeyEvent): Boolean {
-                if (event.action == KeyEvent.ACTION_DOWN) {
+                // Only handle special keys (Enter, etc.); commitText handles regular chars
+                if (event.action == KeyEvent.ACTION_DOWN && event.unicodeChar == 0) {
                     val str = keyEventToString(event)
                     if (str != null) keyListener(str)
                 }
