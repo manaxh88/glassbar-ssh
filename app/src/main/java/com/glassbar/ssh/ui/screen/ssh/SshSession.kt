@@ -92,7 +92,10 @@ class SshSession(
                     // Expected on disconnect
                 } catch (e: Exception) {
                     if (readThread?.isInterrupted == false) {
-                        _errorMessage.value = "Read error: ${e.message}"
+                        val errMsg = "ERR: ${e.message ?: "unknown"}"
+                        _errorMessage.value = errMsg
+                        terminalBuffer.write((errMsg + "
+").toByteArray())
                     }
                 }
             }.apply {
