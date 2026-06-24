@@ -81,6 +81,8 @@ private class TerminalNativeView(
 
     var keyListener: (String) -> Unit = {}
 
+    private var lastDeleteSurroundingTime = 0L
+
     init {
         isFocusable = true
         isFocusableInTouchMode = true
@@ -117,17 +119,27 @@ private class TerminalNativeView(
                 repeat(beforeLength.coerceAtMost(500)) { keyListener("\u007F") }
                 return true
             }
+            override fun deleteSurroundingText(beforeLength: Int, afterLength: Int): Boolean {
+                lastDeleteSurroundingTime = System.currentTimeMillis()
+                repeat(beforeLength.coerceAtMost(200)) { keyListener("\u007F") }
+                return true
+            }
             override fun sendKeyEvent(event: KeyEvent): Boolean {
                 if (event.action != KeyEvent.ACTION_DOWN) return true
-                // Enter and Delete always handled here
+                // DEL fallback: use if deleteSurroundingText not called recently (< 80ms)
+                if (event.keyCode == KeyEvent.KEYCODE_DEL) {
+                    if (System.currentTimeMillis() - lastDeleteSurroundingTime > 80) {
+                        keyListener("\u007F")
+                    }
+                    return true
+                }
+                // Enter
                 if (event.keyCode == KeyEvent.KEYCODE_ENTER) { keyListener("\r"); return true }
-                if (event.keyCode == KeyEvent.KEYCODE_DEL) { keyListener("\u007F"); return true }
-                // Other special keys (arrows, F-keys, etc.) — only those without unicode char
+                // Other special keys (unicodeChar == 0)
                 if (event.unicodeChar == 0) {
                     val str = keyEventToString(event)
                     if (str != null) keyListener(str)
                 }
-                // Regular chars (unicodeChar != 0) handled by commitText — skip here
                 return true
             }
             override fun performEditorAction(actionCode: Int): Boolean {
