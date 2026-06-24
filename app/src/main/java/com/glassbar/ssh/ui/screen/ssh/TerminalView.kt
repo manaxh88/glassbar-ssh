@@ -101,11 +101,14 @@ private class TerminalNativeView(
 
     override fun onCreateInputConnection(outAttrs: android.view.inputmethod.EditorInfo): android.view.inputmethod.InputConnection {
         outAttrs.inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE
-        outAttrs.imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_SEND or
-                android.view.inputmethod.EditorInfo.IME_FLAG_NO_FULLSCREEN
+        outAttrs.imeOptions = android.view.inputmethod.EditorInfo.IME_FLAG_NO_FULLSCREEN
         return object : android.view.inputmethod.BaseInputConnection(this, false) {
             override fun commitText(text: CharSequence?, newCursorPosition: Int): Boolean {
-                text?.let { keyListener(it.toString()) }
+                text?.let {
+                    // Replace newline with carriage return for SSH
+                    val str = it.toString().replace("\n", "\r")
+                    keyListener(str)
+                }
                 return super.commitText(text, newCursorPosition)
             }
             override fun setComposingText(text: CharSequence?, newCursorPosition: Int): Boolean {
