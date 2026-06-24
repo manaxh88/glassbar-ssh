@@ -115,11 +115,6 @@ private class TerminalNativeView(
                 return super.setComposingText(text, newCursorPosition)
             }
             override fun deleteSurroundingText(beforeLength: Int, afterLength: Int): Boolean {
-                // Fallback for long-press delete
-                repeat(beforeLength.coerceAtMost(500)) { keyListener("\u007F") }
-                return true
-            }
-            override fun deleteSurroundingText(beforeLength: Int, afterLength: Int): Boolean {
                 lastDeleteSurroundingTime = System.currentTimeMillis()
                 repeat(beforeLength.coerceAtMost(200)) { keyListener("\u007F") }
                 return true
