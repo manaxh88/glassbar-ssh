@@ -94,8 +94,7 @@ class SshSession(
                     if (readThread?.isInterrupted == false) {
                         val errMsg = "ERR: ${e.message ?: "unknown"}"
                         _errorMessage.value = errMsg
-                        terminalBuffer.write((errMsg + "
-").toByteArray())
+                        terminalBuffer.write((errMsg + "\n").toByteArray())
                     }
                 }
             }.apply {
