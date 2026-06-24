@@ -89,7 +89,7 @@ class SshSession(
                         terminalBuffer.write(buf, 0, n)
                     }
                 } catch (e: InterruptedException) {
-                    // Expected on disconnect
+                    terminalBuffer.write(" [EOF]\n".toByteArray())
                 } catch (e: Exception) {
                     if (readThread?.isInterrupted == false) {
                         val errMsg = "ERR: ${e.message ?: "unknown"}"
@@ -102,6 +102,9 @@ class SshSession(
                 isDaemon = true
                 start()
             }
+
+            // Write a marker to confirm the read thread should receive data
+            terminalBuffer.write("~\n".toByteArray())
 
             _state.value = SshConnectionState.CONNECTED
         } catch (e: Exception) {
