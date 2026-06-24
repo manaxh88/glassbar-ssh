@@ -135,6 +135,15 @@ fun TerminalView(
                 .padding(horizontal = 10.dp, vertical = 8.dp),
             textStyle = TextStyle(color = Color(0xFF1A1A1A), fontSize = 15.sp),
             singleLine = true,
+            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                imeAction = androidx.compose.ui.text.input.ImeAction.Send
+            ),
+            keyboardActions = androidx.compose.foundation.text.KeyboardActions(
+                onSend = {
+                    onKeyEvent(imeText + "\r")
+                    imeText = ""
+                }
+            ),
         )
     }
 }
