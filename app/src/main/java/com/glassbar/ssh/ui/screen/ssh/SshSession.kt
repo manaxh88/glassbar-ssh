@@ -112,9 +112,6 @@ class SshSession(
                 start()
             }
 
-            // Write a marker to confirm the read thread should receive data
-            terminalBuffer.write("~\n".toByteArray())
-
             _state.value = SshConnectionState.CONNECTED
         } catch (e: Exception) {
             _state.value = SshConnectionState.ERROR
