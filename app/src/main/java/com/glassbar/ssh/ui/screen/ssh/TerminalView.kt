@@ -103,6 +103,14 @@ private class TerminalNativeView(
                 text?.let { keyListener(it.toString()) }
                 return true
             }
+            override fun setComposingText(text: CharSequence?, newCursorPosition: Int): Boolean {
+                text?.let { keyListener(it.toString()) }
+                return true
+            }
+            override fun deleteSurroundingText(beforeLength: Int, afterLength: Int): Boolean {
+                if (beforeLength > 0) keyListener("\u007F")
+                return true
+            }
             override fun sendKeyEvent(event: KeyEvent): Boolean {
                 if (event.action == KeyEvent.ACTION_DOWN) {
                     val str = keyEventToString(event)
