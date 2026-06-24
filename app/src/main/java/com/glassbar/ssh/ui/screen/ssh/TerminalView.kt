@@ -44,7 +44,10 @@ fun TerminalView(
     }
 
     LaunchedEffect(buffer) {
-        buffer.addChangeListener { terminalView.postInvalidate() }
+        val handler = android.os.Handler(android.os.Looper.getMainLooper())
+        buffer.addChangeListener {
+            handler.post { terminalView.invalidate() }
+        }
     }
 
     LaunchedEffect(Unit) {
