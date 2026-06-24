@@ -172,13 +172,13 @@ private class TerminalNativeView(
         val canvasHeight = height.toFloat()
         if (canvasWidth <= 0 || canvasHeight <= 0) return
 
-        textPaint.textSize = canvasHeight / buffer.rows * 0.92f
+        textPaint.textSize = canvasHeight / buffer.rows
         var cellW = textPaint.measureText("M")
         if (cellW * buffer.cols > canvasWidth) {
-            textPaint.textSize = canvasWidth / buffer.cols * 0.96f
+            textPaint.textSize = canvasWidth / buffer.cols * 0.98f
             cellW = textPaint.measureText("M")
         }
-        val cellH = canvasHeight / buffer.rows
+        val cellH = textPaint.textSize
 
         val visibleRows = buffer.visibleRows()
         for (r in visibleRows.indices) {
@@ -188,7 +188,7 @@ private class TerminalNativeView(
                 if (cell.char == ' ') continue
 
                 val x = c * cellW
-                val baseline = r * cellH - textPaint.ascent() * 0.95f
+                val baseline = r * cellH - textPaint.ascent()
 
                 if (cell.bg != TerminalColors.DEFAULT_BG) {
                     bgPaint.color = TerminalColors.bg(cell.bg)
