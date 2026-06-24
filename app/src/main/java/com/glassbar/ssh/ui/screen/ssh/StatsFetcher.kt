@@ -18,8 +18,8 @@ object StatsFetcher {
                 val jsch = JSch()
                 val config = java.util.Properties()
                 config.setProperty("StrictHostKeyChecking", "no")
-                JSch.setConfig(config)
                 val session = jsch.getSession(username, host, port)
+                session.setConfig(config)
                 session.setPassword(password)
                 session.connect(5000)
 
@@ -43,7 +43,7 @@ object StatsFetcher {
     private fun execCommand(session: com.jcraft.jsch.Session, command: String): String {
         val channel = session.openChannel("exec") as com.jcraft.jsch.ChannelExec
         channel.setCommand(command)
-        channel.inputStream
+        channel.connect(5000)
         val result = channel.inputStream.bufferedReader().readText()
         channel.disconnect()
         return result
