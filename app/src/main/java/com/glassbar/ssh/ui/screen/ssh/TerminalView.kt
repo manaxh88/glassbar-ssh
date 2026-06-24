@@ -6,43 +6,24 @@ import android.graphics.Paint
 import android.graphics.Typeface
 import android.view.KeyEvent
 import android.view.View
-import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.navigationBarsPadding
 import kotlinx.coroutines.delay
 
-// Light terminal palette
-// Terminal background is transparent; parent SshScreen provides the surfaceContainer background
 private val TermFg = android.graphics.Color.rgb(26, 26, 26)
 
 @Composable
@@ -55,7 +36,9 @@ fun TerminalView(
     val context = LocalContext.current
     var cursorTick by remember { mutableIntStateOf(0) }
 
-    val terminalView = remember { TerminalNativeView(context, buffer) }
+    val terminalView = remember {
+        TerminalNativeView(context, buffer).also { it.keyListener = onKeyEvent }
+    }
 
     LaunchedEffect(buffer) {
         buffer.addChangeListener { terminalView.postInvalidate() }
@@ -73,77 +56,14 @@ fun TerminalView(
     }
 
     LaunchedEffect(focusRequester) {
-        delay(100)
-        focusRequester.requestFocus()
+        delay(200)
+        terminalView.requestFocus()
     }
 
-    DisposableEffect(Unit) {
-        terminalView.keyListener = onKeyEvent
-        onDispose { terminalView.keyListener = {} }
-    }
-
-    // Text field to capture software keyboard input
-    var imeText by remember { mutableStateOf("") }
-
-    Box(
-        modifier = modifier
-            .onKeyEvent { event ->
-                val nativeEvent = event.nativeKeyEvent
-                if (nativeEvent.action == KeyEvent.ACTION_DOWN) {
-                    val str = keyEventToString(nativeEvent)
-                    if (str != null) {
-                        onKeyEvent(str)
-                        true
-                    } else false
-                } else false
-            },
-    ) {
-        // Terminal canvas — fills space above input bar
+    Box(modifier = modifier) {
         AndroidView(
             factory = { terminalView },
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(3.dp)
-                .padding(bottom = 42.dp),
-        )
-
-        // IME input bar at bottom with border
-        BasicTextField(
-            value = imeText,
-            onValueChange = { newText ->
-                if (newText.length > imeText.length) {
-                    val added = newText.substring(imeText.length)
-                    // If Enter/newline pressed, send CR and clear
-                    if (added.contains("\n")) {
-                        onKeyEvent(imeText + "\r")
-                        imeText = ""
-                        return@BasicTextField
-                    }
-                    onKeyEvent(added)
-                }
-                imeText = newText
-                if (imeText.length > 80) imeText = ""
-            },
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .fillMaxWidth()
-                .imePadding()
-                .navigationBarsPadding()
-                .focusRequester(focusRequester)
-                .border(1.dp, Color(0xFFCCCCCC), RoundedCornerShape(8.dp))
-                .background(Color.White.copy(alpha = 0.95f), RoundedCornerShape(8.dp))
-                .padding(horizontal = 10.dp, vertical = 8.dp),
-            textStyle = TextStyle(color = Color(0xFF1A1A1A), fontSize = 15.sp),
-            singleLine = true,
-            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
-                imeAction = androidx.compose.ui.text.input.ImeAction.Send
-            ),
-            keyboardActions = androidx.compose.foundation.text.KeyboardActions(
-                onSend = {
-                    onKeyEvent(imeText + "\r")
-                    imeText = ""
-                }
-            ),
+            modifier = Modifier.fillMaxSize().padding(3.dp),
         )
     }
 }
@@ -154,6 +74,48 @@ private class TerminalNativeView(
 ) : View(context) {
 
     var keyListener: (String) -> Unit = {}
+
+    init {
+        isFocusable = true
+        isFocusableInTouchMode = true
+    }
+
+    override fun onCheckIsTextEditor(): Boolean = true
+
+    override fun onCreateInputConnection(outAttrs: android.view.inputmethod.EditorInfo): android.view.inputmethod.InputConnection {
+        outAttrs.inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE
+        outAttrs.imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_SEND or
+                android.view.inputmethod.EditorInfo.IME_FLAG_NO_FULLSCREEN
+        return object : android.view.inputmethod.BaseInputConnection(this, false) {
+            override fun commitText(text: CharSequence?, newCursorPosition: Int): Boolean {
+                text?.let { keyListener(it.toString()) }
+                return true
+            }
+            override fun sendKeyEvent(event: KeyEvent): Boolean {
+                if (event.action == KeyEvent.ACTION_DOWN) {
+                    val str = keyEventToString(event)
+                    if (str != null) keyListener(str)
+                }
+                return true
+            }
+            override fun performEditorAction(actionCode: Int): Boolean {
+                if (actionCode == android.view.inputmethod.EditorInfo.IME_ACTION_SEND) {
+                    keyListener("\r")
+                    return true
+                }
+                return super.performEditorAction(actionCode)
+            }
+        }
+    }
+
+    override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
+        val str = keyEventToString(event)
+        if (str != null) {
+            keyListener(str)
+            return true
+        }
+        return super.onKeyDown(keyCode, event)
+    }
 
     private val textPaint = Paint().apply {
         isAntiAlias = true
@@ -171,7 +133,6 @@ private class TerminalNativeView(
         val canvasHeight = height.toFloat()
         if (canvasWidth <= 0 || canvasHeight <= 0) return
 
-        // Calculate cell size — fixed font, width-constrained
         textPaint.textSize = 36f
         var cellW = textPaint.measureText("M")
         if (cellW * buffer.cols > canvasWidth) {
@@ -180,9 +141,6 @@ private class TerminalNativeView(
         }
         val cellH = textPaint.textSize * 1.05f
 
-        // Background is provided by parent — do not draw
-
-        // Render visible rows
         val visibleRows = buffer.visibleRows()
         for (r in visibleRows.indices) {
             val row = visibleRows[r]
@@ -193,25 +151,15 @@ private class TerminalNativeView(
                 val x = c * cellW
                 val baseline = r * cellH - textPaint.ascent() * 0.95f
 
-                // Cell background
                 if (cell.bg != TerminalColors.DEFAULT_BG) {
                     bgPaint.color = TerminalColors.bg(cell.bg)
-                    canvas.drawRect(
-                        c * cellW, r * cellH,
-                        (c + 1) * cellW, (r + 1) * cellH,
-                        bgPaint
-                    )
+                    canvas.drawRect(c * cellW, r * cellH, (c + 1) * cellW, (r + 1) * cellH, bgPaint)
                 }
 
-                // Text foreground — invert logic: default FG is black (7=white in classic ANSI)
                 val ansiFg = if (cell.inverse) cell.bg else cell.fg
-                textPaint.color = if (ansiFg == TerminalColors.DEFAULT_FG) {
-                    TermFg
-                } else if (ansiFg == 0) {
-                    TermFg  // Black → near-black on white bg
-                } else {
-                    TerminalColors.fg(ansiFg)
-                }
+                textPaint.color = if (ansiFg == TerminalColors.DEFAULT_FG) TermFg
+                else if (ansiFg == 0) TermFg
+                else TerminalColors.fg(ansiFg)
                 textPaint.isFakeBoldText = cell.bold
                 textPaint.isUnderlineText = cell.underline
 
@@ -219,7 +167,6 @@ private class TerminalNativeView(
             }
         }
 
-        // Cursor
         val curCol = buffer.cursorCol
         val curRow = buffer.cursorRow - buffer.scrollTop
         val times = System.currentTimeMillis() % 1060
@@ -227,11 +174,8 @@ private class TerminalNativeView(
             curRow in 0 until buffer.rows && curCol in 0 until buffer.cols
         ) {
             cursorPaint.color = android.graphics.Color.argb(100, 0, 0, 0)
-            canvas.drawRect(
-                curCol * cellW, curRow * cellH,
-                (curCol + 1) * cellW, (curRow + 1) * cellH,
-                cursorPaint
-            )
+            canvas.drawRect(curCol * cellW, curRow * cellH,
+                (curCol + 1) * cellW, (curRow + 1) * cellH, cursorPaint)
         }
     }
 }
