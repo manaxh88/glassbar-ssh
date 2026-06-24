@@ -45,6 +45,8 @@ fun TerminalView(
 
     LaunchedEffect(buffer) {
         buffer.addChangeListener { terminalView.postInvalidate() }
+        // Test: write directly to buffer to verify rendering pipeline
+        buffer.write("> Test message\n> ".toByteArray())
     }
 
     LaunchedEffect(Unit) {
@@ -157,12 +159,6 @@ private class TerminalNativeView(
         val canvasWidth = width.toFloat()
         val canvasHeight = height.toFloat()
         if (canvasWidth <= 0 || canvasHeight <= 0) return
-
-        // Debug: draw a test line to verify rendering
-        textPaint.textSize = 36f
-        textPaint.color = android.graphics.Color.RED
-        canvas.drawText("TEST", 10f, 50f, textPaint)
-        textPaint.color = TermFg
 
         textPaint.textSize = 36f
         var cellW = textPaint.measureText("M")
