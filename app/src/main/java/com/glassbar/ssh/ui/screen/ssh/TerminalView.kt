@@ -112,11 +112,11 @@ private class TerminalNativeView(
                 return super.setComposingText(text, newCursorPosition)
             }
             override fun deleteSurroundingText(beforeLength: Int, afterLength: Int): Boolean {
-                if (beforeLength > 0) keyListener("\u007F")
+                // Handled by sendKeyEvent for KEYCODE_DEL
                 return true
             }
             override fun sendKeyEvent(event: KeyEvent): Boolean {
-                // Only handle special keys (Enter, etc.); commitText handles regular chars
+                // Handle all special keys including Delete via KeyEvent
                 if (event.action == KeyEvent.ACTION_DOWN && event.unicodeChar == 0) {
                     val str = keyEventToString(event)
                     if (str != null) keyListener(str)
