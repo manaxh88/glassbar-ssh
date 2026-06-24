@@ -3,12 +3,17 @@ package com.glassbar.ssh.ui.screen.ssh
 import com.jcraft.jsch.ChannelShell
 import com.jcraft.jsch.JSch
 import com.jcraft.jsch.Session
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.InputStream
+import java.io.InputStreamReader
 import java.io.OutputStream
 
 enum class SshConnectionState {
@@ -33,6 +38,8 @@ class SshSession(
 
     private val _errorMessage = MutableStateFlow<String?>(null)
     val errorMessage: StateFlow<String?> = _errorMessage.asStateFlow()
+
+    private val ioScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     private var session: Session? = null
     private var channel: ChannelShell? = null
@@ -82,11 +89,13 @@ class SshSession(
             // Start read thread
             readThread = Thread {
                 try {
-                    val buf = ByteArray(4096)
+                    val reader = InputStreamReader(inputStream, Charsets.UTF_8)
+                    val buf = CharArray(4096)
                     while (!Thread.currentThread().isInterrupted) {
-                        val n = inputStream.read(buf)
+                        val n = reader.read(buf)
                         if (n == -1) break
-                        terminalBuffer.write(buf, 0, n)
+                        val str = String(buf, 0, n)
+                        terminalBuffer.write(str.toByteArray())
                     }
                 } catch (e: InterruptedException) {
                     terminalBuffer.write(" [EOF]\n".toByteArray())
@@ -115,20 +124,26 @@ class SshSession(
     }
 
     fun send(data: String) {
-        try {
-            outputStream?.write(data.toByteArray())
-            outputStream?.flush()
-        } catch (_: Exception) {
+        if (_state.value != SshConnectionState.CONNECTED) return
+        ioScope.launch {
+            try {
+                outputStream?.write(data.toByteArray())
+                outputStream?.flush()
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
         }
     }
 
     fun send(bytes: ByteArray) {
         if (_state.value != SshConnectionState.CONNECTED) return
-        try {
-            outputStream?.write(bytes)
-            outputStream?.flush()
-        } catch (_: Exception) {
-            // Connection lost
+        ioScope.launch {
+            try {
+                outputStream?.write(bytes)
+                outputStream?.flush()
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
         }
     }
 
@@ -137,6 +152,7 @@ class SshSession(
     }
 
     fun disconnect() {
+        ioScope.cancel()
         readThread?.interrupt()
         readThread = null
         try {
