@@ -74,7 +74,7 @@ fun HomeScreen(
                 val s = StatsFetcher.fetch(conn.host, conn.port, conn.username, conn.password)
                 serverStats = serverStats + (conn.id to s)
             }
-            delay(10_000)
+            delay(3_000)
         }
     }
 
