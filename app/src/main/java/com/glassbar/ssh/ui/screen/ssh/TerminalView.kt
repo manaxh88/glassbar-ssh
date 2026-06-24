@@ -44,21 +44,15 @@ fun TerminalView(
     }
 
     LaunchedEffect(buffer) {
-        val handler = android.os.Handler(android.os.Looper.getMainLooper())
-        buffer.addChangeListener {
-            handler.post { terminalView.invalidate() }
-        }
+        buffer.addChangeListener { terminalView.postInvalidate() }
     }
 
     LaunchedEffect(Unit) {
         while (true) {
-            delay(530)
+            delay(250)
             cursorTick++
+            terminalView.invalidate()
         }
-    }
-
-    LaunchedEffect(cursorTick) {
-        terminalView.invalidate()
     }
 
     LaunchedEffect(focusRequester) {
