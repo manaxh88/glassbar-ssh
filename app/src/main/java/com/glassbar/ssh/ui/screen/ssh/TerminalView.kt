@@ -13,6 +13,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.runtime.Composable
@@ -35,6 +37,8 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import kotlinx.coroutines.delay
 
 // Light terminal palette
@@ -94,13 +98,16 @@ fun TerminalView(
                 } else false
             },
     ) {
-        // Terminal canvas
+        // Terminal canvas — fills space above input bar
         AndroidView(
             factory = { terminalView },
-            modifier = Modifier.fillMaxSize().padding(3.dp),
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(3.dp)
+                .padding(bottom = 42.dp),
         )
 
-        // IME input bar at bottom — always focused to show keyboard
+        // IME input bar at bottom with border
         BasicTextField(
             value = imeText,
             onValueChange = { newText ->
@@ -114,19 +121,14 @@ fun TerminalView(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
-                .focusRequester(focusRequester),
-            textStyle = TextStyle(color = Color(0xFF1A1A1A), fontSize = 16.sp),
+                .imePadding()
+                .navigationBarsPadding()
+                .focusRequester(focusRequester)
+                .border(1.dp, Color(0xFFCCCCCC), RoundedCornerShape(8.dp))
+                .background(Color.White.copy(alpha = 0.95f), RoundedCornerShape(8.dp))
+                .padding(horizontal = 10.dp, vertical = 8.dp),
+            textStyle = TextStyle(color = Color(0xFF1A1A1A), fontSize = 15.sp),
             singleLine = true,
-            decorationBox = { inner ->
-                androidx.compose.foundation.layout.Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(Color.White.copy(alpha = 0.9f))
-                        .padding(horizontal = 8.dp, vertical = 4.dp)
-                ) {
-                    inner()
-                }
-            },
         )
     }
 }
