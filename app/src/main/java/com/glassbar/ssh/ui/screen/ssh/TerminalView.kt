@@ -45,8 +45,6 @@ fun TerminalView(
 
     LaunchedEffect(buffer) {
         buffer.addChangeListener { terminalView.postInvalidate() }
-        // Test: write directly to buffer to verify rendering pipeline
-        buffer.write("> Test message\n> ".toByteArray())
     }
 
     LaunchedEffect(Unit) {

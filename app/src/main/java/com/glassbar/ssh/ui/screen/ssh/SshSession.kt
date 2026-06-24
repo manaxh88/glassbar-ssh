@@ -74,17 +74,17 @@ class SshSession(
             )
             channel?.setPtyType("xterm-256color")
 
-            val inputStream = channel?.inputStream
             outputStream = channel?.outputStream
-
             channel?.connect(5000)
+            val inputStream = channel?.inputStream
+                ?: throw Exception("Failed to get input stream")
 
             // Start read thread
             readThread = Thread {
                 try {
                     val buf = ByteArray(4096)
                     while (!Thread.currentThread().isInterrupted) {
-                        val n = inputStream?.read(buf) ?: -1
+                        val n = inputStream.read(buf)
                         if (n == -1) break
                         terminalBuffer.write(buf, 0, n)
                     }
@@ -110,12 +110,10 @@ class SshSession(
     }
 
     fun send(data: String) {
-        if (_state.value != SshConnectionState.CONNECTED) return
         try {
-            outputStream?.write(data.toByteArray(Charsets.UTF_8))
+            outputStream?.write(data.toByteArray())
             outputStream?.flush()
         } catch (_: Exception) {
-            // Connection lost
         }
     }
 
