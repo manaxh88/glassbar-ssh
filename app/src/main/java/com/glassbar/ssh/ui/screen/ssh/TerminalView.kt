@@ -102,8 +102,9 @@ private class TerminalNativeView(
         return object : android.view.inputmethod.BaseInputConnection(this, false) {
             override fun commitText(text: CharSequence?, newCursorPosition: Int): Boolean {
                 text?.let {
-                    val str = it.toString().replace("\n", "\r")
-                    keyListener(str)
+                    // Exclude newline — handled by sendKeyEvent for Enter
+                    val str = it.toString().replace("\n", "")
+                    if (str.isNotEmpty()) keyListener(str)
                 }
                 return super.commitText(text, newCursorPosition)
             }
@@ -118,20 +119,15 @@ private class TerminalNativeView(
             }
             override fun sendKeyEvent(event: KeyEvent): Boolean {
                 if (event.action != KeyEvent.ACTION_DOWN) return true
-                // Always handle Enter and Delete
-                if (event.keyCode == KeyEvent.KEYCODE_ENTER) {
-                    keyListener("\r")
-                    return true
-                }
-                if (event.keyCode == KeyEvent.KEYCODE_DEL) {
-                    keyListener("\u007F")
-                    return true
-                }
-                // Handle other special keys without unicode char (arrows, F-keys, etc.)
+                // Enter and Delete always handled here
+                if (event.keyCode == KeyEvent.KEYCODE_ENTER) { keyListener("\r"); return true }
+                if (event.keyCode == KeyEvent.KEYCODE_DEL) { keyListener("\u007F"); return true }
+                // Other special keys (arrows, F-keys, etc.) — only those without unicode char
                 if (event.unicodeChar == 0) {
                     val str = keyEventToString(event)
                     if (str != null) keyListener(str)
                 }
+                // Regular chars (unicodeChar != 0) handled by commitText — skip here
                 return true
             }
             override fun performEditorAction(actionCode: Int): Boolean {
