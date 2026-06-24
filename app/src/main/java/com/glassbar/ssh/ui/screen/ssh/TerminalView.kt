@@ -112,11 +112,14 @@ private class TerminalNativeView(
                 return super.setComposingText(text, newCursorPosition)
             }
             override fun deleteSurroundingText(beforeLength: Int, afterLength: Int): Boolean {
-                // Handled by sendKeyEvent for KEYCODE_DEL
+                // Send DEL for each character to delete (handles long-press delete)
+                repeat(beforeLength.coerceAtMost(500)) { keyListener("\u007F") }
                 return true
             }
             override fun sendKeyEvent(event: KeyEvent): Boolean {
-                // Handle all special keys including Delete via KeyEvent
+                // Skip DEL — handled by deleteSurroundingText (supports long-press)
+                if (event.keyCode == KeyEvent.KEYCODE_DEL) return true
+                // Handle all other special keys
                 if (event.action == KeyEvent.ACTION_DOWN && event.unicodeChar == 0) {
                     val str = keyEventToString(event)
                     if (str != null) keyListener(str)
