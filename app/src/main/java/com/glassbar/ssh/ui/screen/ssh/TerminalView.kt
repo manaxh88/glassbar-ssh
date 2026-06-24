@@ -80,12 +80,9 @@ fun TerminalView(
 
     // Text field to capture software keyboard input
     var imeText by remember { mutableStateOf("") }
-    val imeFocusRequester = remember { FocusRequester() }
 
     Box(
         modifier = modifier
-            .focusRequester(focusRequester)
-            .focusable()
             .onKeyEvent { event ->
                 val nativeEvent = event.nativeKeyEvent
                 if (nativeEvent.action == KeyEvent.ACTION_DOWN) {
@@ -103,25 +100,21 @@ fun TerminalView(
             modifier = Modifier.fillMaxSize().padding(3.dp),
         )
 
-        // IME input bar at bottom
+        // IME input bar at bottom — always focused to show keyboard
         BasicTextField(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .fillMaxWidth()
-                .focusRequester(imeFocusRequester)
-                .clickable { imeFocusRequester.requestFocus() },
             value = imeText,
             onValueChange = { newText ->
                 if (newText.length > imeText.length) {
                     val ch = newText.substring(imeText.length)
                     onKeyEvent(ch)
-                } else if (newText.length < imeText.length) {
-                    // Backspace handled by hardware key event
                 }
                 imeText = newText
-                // Auto-clear after accumulation
                 if (imeText.length > 80) imeText = ""
             },
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .focusRequester(focusRequester),
             textStyle = TextStyle(color = Color(0xFF1A1A1A), fontSize = 16.sp),
             singleLine = true,
             decorationBox = { inner ->
