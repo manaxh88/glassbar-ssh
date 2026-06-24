@@ -21,7 +21,6 @@ import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Computer
 import androidx.compose.material.icons.rounded.Edit
-import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -163,29 +162,35 @@ fun HomeScreen(
                                     overflow = TextOverflow.Ellipsis,
                                 )
                             }
-                            // Server stats charts
+                            // Server stats charts — always visible, tap to refresh
                             val stats = serverStats[conn.id]
-                            if (stats != null && stats.error == null) {
-                                CircularChart(value = stats.cpuPercent, color = Color(0xFF4CAF50), label = "CPU")
-                                Spacer(Modifier.width(8.dp))
-                                CircularChart(value = stats.memPercent, color = Color(0xFF2196F3), label = "内存")
-                                Spacer(Modifier.width(8.dp))
-                            } else {
-                                Icon(
-                                    imageVector = Icons.Rounded.Refresh,
-                                    contentDescription = "刷新",
-                                    tint = Color(0xFF1976D2),
-                                    modifier = Modifier
-                                        .size(18.dp)
-                                        .clickable {
-                                            scope.launch {
-                                                val s = StatsFetcher.fetch(conn.host, conn.port, conn.username, conn.password)
-                                                serverStats = serverStats + (conn.id to s)
-                                            }
-                                        },
-                                )
-                                Spacer(Modifier.width(10.dp))
+                            val cpuVal = stats?.cpuPercent ?: 0f
+                            val memVal = stats?.memPercent ?: 0f
+                            val hasError = stats?.error != null
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Row(
+                                    modifier = Modifier.clickable {
+                                        scope.launch {
+                                            val s = StatsFetcher.fetch(conn.host, conn.port, conn.username, conn.password)
+                                            serverStats = serverStats + (conn.id to s)
+                                        }
+                                    },
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    CircularChart(
+                                        value = if (hasError) 0f else cpuVal,
+                                        color = if (hasError) Color(0xFFFF5252) else Color(0xFF4CAF50),
+                                        label = if (hasError) "错误" else "CPU",
+                                    )
+                                    Spacer(Modifier.width(6.dp))
+                                    CircularChart(
+                                        value = if (hasError) 0f else memVal,
+                                        color = if (hasError) Color(0xFFFF5252) else Color(0xFF2196F3),
+                                        label = if (hasError) "" else "内存",
+                                    )
+                                }
                             }
+                            Spacer(Modifier.width(8.dp))
                             Icon(
                                 imageVector = Icons.Rounded.Edit,
                                 contentDescription = "编辑",
