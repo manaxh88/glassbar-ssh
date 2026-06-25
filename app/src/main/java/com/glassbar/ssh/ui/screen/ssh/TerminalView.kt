@@ -103,20 +103,20 @@ private class TerminalNativeView(
 
     private val gestureDetector = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
         override fun onScroll(e1: MotionEvent?, e2: MotionEvent, dx: Float, dy: Float): Boolean {
-            // Scroll vertically: dy > 0 = finger moving down = scroll up (see older content)
             val lines = (dy / 40f).toInt()
             if (lines != 0) buffer.scrollBy(lines)
+            return true
+        }
+        override fun onSingleTapUp(e: MotionEvent): Boolean {
+            requestFocus()
+            val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager
+            imm.showSoftInput(this@TerminalNativeView, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT)
             return true
         }
     })
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
         gestureDetector.onTouchEvent(event)
-        if (event.action == MotionEvent.ACTION_DOWN) {
-            requestFocus()
-            val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager
-            imm.showSoftInput(this, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT)
-        }
         return true
     }
 
