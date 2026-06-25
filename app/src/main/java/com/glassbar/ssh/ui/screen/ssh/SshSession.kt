@@ -47,6 +47,7 @@ class SshSession(
     private var session: Session? = null
     private var channel: ChannelShell? = null
     private var readThread: Thread? = null
+    private var inputStream: InputStream? = null
     private var outputStream: OutputStream? = null
 
     val isConnected: Boolean get() = _state.value == SshConnectionState.CONNECTED
@@ -86,22 +87,20 @@ class SshSession(
 
             outputStream = channel?.outputStream
             channel?.connect(5000)
-            val inputStream = channel?.inputStream
+            inputStream = channel?.inputStream
                 ?: throw Exception("Failed to get input stream")
 
             // Start read thread
             readThread = Thread {
+                val reader = InputStreamReader(inputStream, Charsets.UTF_8)
+                val buf = CharArray(4096)
                 try {
-                    val reader = InputStreamReader(inputStream, Charsets.UTF_8)
-                    val buf = CharArray(4096)
                     while (!Thread.currentThread().isInterrupted) {
                         val n = reader.read(buf)
                         if (n == -1) break
                         val str = String(buf, 0, n)
                         outputBuffer.add(str)
                     }
-                } catch (e: InterruptedException) {
-                    terminalBuffer.write(" [EOF]\n".toByteArray())
                 } catch (e: Exception) {
                     if (readThread?.isInterrupted == false) {
                         val errMsg = "ERR: ${e.message ?: "unknown"}"
@@ -127,7 +126,7 @@ class SshSession(
         if (_state.value != SshConnectionState.CONNECTED) return
         ioScope.launch {
             try {
-                outputStream?.write(data.toByteArray())
+                outputStream?.write(data.toByteArray(Charsets.UTF_8))
                 outputStream?.flush()
             } catch (e: Exception) {
                 e.printStackTrace()
@@ -154,6 +153,10 @@ class SshSession(
     fun disconnect() {
         ioScope.cancel()
         ioScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+        try {
+            inputStream?.close()
+        } catch (_: Exception) {}
+        inputStream = null
         readThread?.interrupt()
         readThread = null
         try {

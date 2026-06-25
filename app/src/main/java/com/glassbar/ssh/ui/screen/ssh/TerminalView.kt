@@ -103,7 +103,8 @@ private class TerminalNativeView(
 
     private val gestureDetector = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
         override fun onScroll(e1: MotionEvent?, e2: MotionEvent, dx: Float, dy: Float): Boolean {
-            val lines = (dy / 40f).toInt()
+            // 取反 dy 以修正滑动方向（手指向上滑动显示更早的内容）
+            val lines = (-dy / 40f).toInt()
             if (lines != 0) buffer.scrollBy(lines)
             return true
         }
@@ -197,22 +198,34 @@ private class TerminalNativeView(
         if (canvasWidth <= 0 || canvasHeight <= 0) return
 
         textPaint.textSize = 41f
-        val cellW = textPaint.measureText("M")
-        val cellH = textPaint.textSize
-
+        // 先测量单字符宽度，再计算能容纳的列数；然后基于列数均分画布宽度，避免列间空隙
+        val measuredCharW = textPaint.measureText("M")
+        val measuredCellH = textPaint.textSize
+        var tentativeCols = (canvasWidth / measuredCharW).toInt().coerceAtLeast(1)
+        // 不需要超过缓冲列数（但至少 1 列）
+        val drawCols = tentativeCols.coerceAtMost(buffer.cols)
+        val cellW = canvasWidth / drawCols
+        val cellH = measuredCellH
         val visibleRows = buffer.visibleRows()
+        val maxVisualRows = buffer.rows
+
         for (r in visibleRows.indices) {
             val row = visibleRows[r]
             for (c in row.indices) {
                 val cell = row[c]
                 if (cell.char == ' ') continue
 
-                val x = c * cellW
-                val baseline = r * cellH - textPaint.ascent()
+                val wrappedRowOffset = c / drawCols
+                val visRow = r + wrappedRowOffset
+                if (visRow >= maxVisualRows) break
+                val wrappedCol = c % drawCols
+
+                val x = wrappedCol * cellW
+                val baseline = visRow * cellH - textPaint.ascent()
 
                 if (cell.bg != TerminalColors.DEFAULT_BG) {
                     bgPaint.color = TerminalColors.bg(cell.bg)
-                    canvas.drawRect(c * cellW, r * cellH, (c + 1) * cellW, (r + 1) * cellH, bgPaint)
+                    canvas.drawRect(wrappedCol * cellW, visRow * cellH, (wrappedCol + 1) * cellW, (visRow + 1) * cellH, bgPaint)
                 }
 
                 val ansiFg = if (cell.inverse) cell.bg else cell.fg
@@ -229,12 +242,16 @@ private class TerminalNativeView(
         val curCol = buffer.cursorCol
         val curRow = buffer.cursorRow - buffer.scrollTop
         val times = System.currentTimeMillis() % 1060
-        if (times < 530 && buffer.cursorVisible &&
-            curRow in 0 until buffer.rows && curCol in 0 until buffer.cols
-        ) {
-            cursorPaint.color = android.graphics.Color.argb(100, 0, 0, 0)
-            canvas.drawRect(curCol * cellW, curRow * cellH,
-                (curCol + 1) * cellW, (curRow + 1) * cellH, cursorPaint)
+        if (times < 530 && buffer.cursorVisible) {
+            val drawColsForCursor = (canvasWidth / cellW).toInt().coerceAtLeast(1)
+            val cursorRowOffset = curCol / drawColsForCursor
+            val cursorVisRow = curRow + cursorRowOffset
+            val cursorVisCol = curCol % drawColsForCursor
+            if (cursorVisRow in 0 until buffer.rows && cursorVisCol in 0 until drawColsForCursor) {
+                cursorPaint.color = android.graphics.Color.argb(100, 0, 0, 0)
+                canvas.drawRect(cursorVisCol * cellW, cursorVisRow * cellH,
+                    (cursorVisCol + 1) * cellW, (cursorVisRow + 1) * cellH, cursorPaint)
+            }
         }
     }
 }

@@ -28,15 +28,17 @@ class TerminalOutputBuffer(
     }
 
     private fun scheduleFlush() {
-        if (flushScheduled) return
-        flushScheduled = true
+        synchronized(chunks) {
+            if (flushScheduled) return
+            flushScheduled = true
+        }
         handler.postDelayed({ doFlush() }, flushIntervalMs)
     }
 
     private fun doFlush() {
-        flushScheduled = false
         var output = ""
         synchronized(chunks) {
+            flushScheduled = false
             if (pendingChars == 0) return
             var remaining = maxCharsPerFlush
             val sb = StringBuilder()
@@ -60,9 +62,7 @@ class TerminalOutputBuffer(
         }
         // If more data remains, schedule next flush
         synchronized(chunks) {
-            if (pendingChars > 0) {
-                scheduleFlush()
-            }
+            if (pendingChars > 0) scheduleFlush()
         }
     }
 }
