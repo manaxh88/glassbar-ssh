@@ -129,8 +129,16 @@ fun SshScreen(
                     fontSize = 20.sp,
                     fontWeight = FontWeight.Bold,
                     color = LightText,
-                    modifier = Modifier.padding(bottom = 16.dp),
+                    modifier = Modifier.padding(bottom = 4.dp),
                 )
+                if (initialConnection != null) {
+                    Text(
+                        text = "${initialConnection.username}@${initialConnection.host}:${initialConnection.port}",
+                        fontSize = 14.sp,
+                        color = Color(0xFF1976D2),
+                        modifier = Modifier.padding(bottom = 12.dp),
+                    )
+                }
 
                 TextField(
                     value = host, onValueChange = { host = it },
