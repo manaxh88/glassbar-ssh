@@ -109,9 +109,10 @@ private class TerminalNativeView(
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
         gestureDetector.onTouchEvent(event)
-        // Tap to focus
-        if (event.action == MotionEvent.ACTION_UP) {
+        if (event.action == MotionEvent.ACTION_DOWN) {
             requestFocus()
+            val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager
+            imm.showSoftInput(this, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT)
         }
         return true
     }
