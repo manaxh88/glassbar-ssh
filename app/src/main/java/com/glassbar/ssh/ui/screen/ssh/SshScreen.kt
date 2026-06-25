@@ -63,7 +63,7 @@ fun SshScreen(
     var username by remember(initialConnection) { mutableStateOf(initialConnection?.username ?: "") }
     var password by remember(initialConnection) { mutableStateOf(initialConnection?.password ?: "") }
 
-    val terminalBuffer = remember { TerminalBuffer(rows = 60, cols = 55) }
+    val terminalBuffer = remember { TerminalBuffer(rows = 34, cols = 60) }
     val sshSession = remember { SshSession(terminalBuffer) }
     val connectionState by sshSession.state.collectAsStateWithLifecycle()
     val errorMessage by sshSession.errorMessage.collectAsStateWithLifecycle()

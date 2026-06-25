@@ -65,10 +65,7 @@ fun TerminalView(
         terminalView.requestFocus()
     }
 
-    Box(
-        modifier = modifier
-            .clickable { terminalView.requestFocus() }
-    ) {
+    Box(modifier = modifier) {
         AndroidView(
             factory = { terminalView },
             modifier = Modifier.fillMaxSize().padding(3.dp),
@@ -193,9 +190,12 @@ private class TerminalNativeView(
         val canvasHeight = height.toFloat()
         if (canvasWidth <= 0 || canvasHeight <= 0) return
 
-        // Fixed large font — ignore width constraint for bigger text
-        textPaint.textSize = 48f
-        val cellW = textPaint.measureText("M")
+        textPaint.textSize = canvasHeight / buffer.rows
+        var cellW = textPaint.measureText("M")
+        if (cellW * buffer.cols > canvasWidth) {
+            textPaint.textSize = canvasWidth / buffer.cols
+            cellW = textPaint.measureText("M")
+        }
         val cellH = textPaint.textSize
 
         val visibleRows = buffer.visibleRows()
