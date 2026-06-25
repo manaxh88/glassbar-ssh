@@ -9,8 +9,10 @@ import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -65,10 +67,14 @@ fun TerminalView(
         terminalView.requestFocus()
     }
 
-    Box(modifier = modifier) {
+    Column(modifier = modifier) {
         AndroidView(
             factory = { terminalView },
-            modifier = Modifier.fillMaxSize().padding(3.dp),
+            modifier = Modifier.weight(1f).fillMaxSize().padding(3.dp),
+        )
+        VirtualKeyboard(
+            onKey = onKeyEvent,
+            modifier = Modifier.fillMaxWidth(),
         )
     }
 }

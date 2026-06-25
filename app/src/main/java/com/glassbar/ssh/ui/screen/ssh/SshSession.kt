@@ -40,6 +40,9 @@ class SshSession(
     val errorMessage: StateFlow<String?> = _errorMessage.asStateFlow()
 
     private var ioScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private val outputBuffer = TerminalOutputBuffer { text ->
+        terminalBuffer.write(text)
+    }
 
     private var session: Session? = null
     private var channel: ChannelShell? = null
@@ -95,7 +98,7 @@ class SshSession(
                         val n = reader.read(buf)
                         if (n == -1) break
                         val str = String(buf, 0, n)
-                        terminalBuffer.write(str)
+                        outputBuffer.add(str)
                     }
                 } catch (e: InterruptedException) {
                     terminalBuffer.write(" [EOF]\n".toByteArray())
