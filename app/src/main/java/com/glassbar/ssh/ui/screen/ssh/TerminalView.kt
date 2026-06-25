@@ -193,12 +193,9 @@ private class TerminalNativeView(
         val canvasHeight = height.toFloat()
         if (canvasWidth <= 0 || canvasHeight <= 0) return
 
-        textPaint.textSize = canvasHeight / buffer.rows
-        var cellW = textPaint.measureText("M")
-        if (cellW * buffer.cols > canvasWidth) {
-            textPaint.textSize = canvasWidth / buffer.cols
-            cellW = textPaint.measureText("M")
-        }
+        // Fixed large font — ignore width constraint for bigger text
+        textPaint.textSize = 48f
+        val cellW = textPaint.measureText("M")
         val cellH = textPaint.textSize
 
         val visibleRows = buffer.visibleRows()
