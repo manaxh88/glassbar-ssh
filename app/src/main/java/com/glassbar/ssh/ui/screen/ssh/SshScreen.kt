@@ -58,10 +58,10 @@ fun SshScreen(
     val context = LocalContext.current
     val focusManager = LocalFocusManager.current
 
-    var host by remember { mutableStateOf(initialConnection?.host ?: "") }
-    var port by remember { mutableStateOf((initialConnection?.port ?: 22).toString()) }
-    var username by remember { mutableStateOf(initialConnection?.username ?: "") }
-    var password by remember { mutableStateOf(initialConnection?.password ?: "") }
+    var host by remember(initialConnection) { mutableStateOf(initialConnection?.host ?: "") }
+    var port by remember(initialConnection) { mutableStateOf((initialConnection?.port ?: 22).toString()) }
+    var username by remember(initialConnection) { mutableStateOf(initialConnection?.username ?: "") }
+    var password by remember(initialConnection) { mutableStateOf(initialConnection?.password ?: "") }
 
     val terminalBuffer = remember { TerminalBuffer(rows = 12, cols = 40) }
     val sshSession = remember { SshSession(terminalBuffer) }
