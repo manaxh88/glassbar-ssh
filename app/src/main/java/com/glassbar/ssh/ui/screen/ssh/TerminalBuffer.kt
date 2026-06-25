@@ -396,5 +396,13 @@ class TerminalBuffer(
         fullReset(); clear()
     }
 
+    /**
+     * Scroll the viewport by delta lines. Positive = scroll up (see older content).
+     */
+    fun scrollBy(delta: Int) {
+        scrollTop = (scrollTop - delta).coerceIn(0, totalRows - rows)
+        notifyChange()
+    }
+
     private enum class EscapeState { NORMAL, ESCAPE, CSI, OSC }
 }

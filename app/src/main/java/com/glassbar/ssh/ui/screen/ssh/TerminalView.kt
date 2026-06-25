@@ -4,7 +4,9 @@ import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Typeface
+import android.view.GestureDetector
 import android.view.KeyEvent
+import android.view.MotionEvent
 import android.view.View
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.clickable
@@ -94,6 +96,24 @@ private class TerminalNativeView(
                 imm.hideSoftInputFromWindow(windowToken, 0)
             }
         }
+    }
+
+    private val gestureDetector = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
+        override fun onScroll(e1: MotionEvent?, e2: MotionEvent, dx: Float, dy: Float): Boolean {
+            // Scroll vertically: dy > 0 = finger moving down = scroll up (see older content)
+            val lines = (dy / 40f).toInt()
+            if (lines != 0) buffer.scrollBy(lines)
+            return true
+        }
+    })
+
+    override fun onTouchEvent(event: MotionEvent): Boolean {
+        gestureDetector.onTouchEvent(event)
+        // Tap to focus
+        if (event.action == MotionEvent.ACTION_UP) {
+            requestFocus()
+        }
+        return true
     }
 
     override fun onCheckIsTextEditor(): Boolean = true
