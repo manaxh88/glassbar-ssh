@@ -104,6 +104,9 @@ private class TerminalNativeView(
         isFocusableInTouchMode = true
         setOnFocusChangeListener { _, hasFocus ->
             handler.post { onFocusChanged(hasFocus) }
+            val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager
+            if (hasFocus) imm.showSoftInput(this, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT)
+            else imm.hideSoftInputFromWindow(windowToken, 0)
         }
     }
 
