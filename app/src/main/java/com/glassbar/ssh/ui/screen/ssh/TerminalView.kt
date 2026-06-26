@@ -8,6 +8,9 @@ import android.view.GestureDetector
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.clickable
@@ -19,6 +22,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -40,10 +44,12 @@ fun TerminalView(
 ) {
     val context = LocalContext.current
     var cursorTick by remember { mutableIntStateOf(0) }
+    var showVirtualKeyboard by remember { mutableStateOf(false) }
 
     val terminalView = remember {
         TerminalNativeView(context, buffer).also {
             it.keyListener = onKeyEvent
+            it.onFocusChanged = { showVirtualKeyboard = it }
         }
     }
 
@@ -72,10 +78,16 @@ fun TerminalView(
             factory = { terminalView },
             modifier = Modifier.weight(1f).fillMaxSize().padding(3.dp),
         )
-        VirtualKeyboard(
-            onKey = onKeyEvent,
-            modifier = Modifier.fillMaxWidth(),
-        )
+        AnimatedVisibility(
+            visible = showVirtualKeyboard,
+            enter = slideInVertically { it },
+            exit = slideOutVertically { it },
+        ) {
+            VirtualKeyboard(
+                onKey = onKeyEvent,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
     }
 }
 
@@ -85,6 +97,7 @@ private class TerminalNativeView(
 ) : View(context) {
 
     var keyListener: (String) -> Unit = {}
+    var onFocusChanged: (Boolean) -> Unit = {}
 
     private var lastDeleteSurroundingTime = 0L
 
@@ -92,6 +105,7 @@ private class TerminalNativeView(
         isFocusable = true
         isFocusableInTouchMode = true
         setOnFocusChangeListener { _, hasFocus ->
+            onFocusChanged(hasFocus)
             val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager
             if (hasFocus) {
                 imm.showSoftInput(this, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT)
