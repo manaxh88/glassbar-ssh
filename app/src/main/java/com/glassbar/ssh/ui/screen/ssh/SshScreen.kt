@@ -64,7 +64,7 @@ fun SshScreen(
     var password by remember(initialConnection) { mutableStateOf(initialConnection?.password ?: "") }
 
     // 增加列数以获得更宽的终端视图（+20 列）
-    val terminalBuffer = remember { TerminalBuffer(rows = 60, cols = 54) }
+    val terminalBuffer = remember { TerminalBuffer(rows = 60, cols = 42) }
     val sshSession = remember { SshSession(terminalBuffer) }
     val connectionState by sshSession.state.collectAsStateWithLifecycle()
     val errorMessage by sshSession.errorMessage.collectAsStateWithLifecycle()
