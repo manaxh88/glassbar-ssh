@@ -68,10 +68,7 @@ fun TerminalView(
         }
     }
 
-    LaunchedEffect(focusRequester) {
-        delay(200)
-        terminalView.requestFocus()
-    }
+    // Terminal gets focus on tap — no auto-focus to avoid showing keyboard initially
 
     Column(modifier = modifier) {
         AndroidView(
