@@ -126,9 +126,15 @@ private class TerminalNativeView(
             return true
         }
         override fun onSingleTapUp(e: MotionEvent): Boolean {
-            requestFocus()
-            val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager
-            imm.showSoftInput(this@TerminalNativeView, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT)
+            if (hasFocus()) {
+                val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager
+                imm.hideSoftInputFromWindow(windowToken, 0)
+                clearFocus()
+            } else {
+                requestFocus()
+                val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager
+                imm.showSoftInput(this@TerminalNativeView, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT)
+            }
             return true
         }
     })
