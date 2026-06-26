@@ -103,9 +103,9 @@ private class TerminalNativeView(
 
     private val gestureDetector = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
         override fun onScroll(e1: MotionEvent?, e2: MotionEvent, dx: Float, dy: Float): Boolean {
-            // 取反 dy 以修正滑动方向（手指向上滑动显示更早的内容）
-            val lines = (-dy / 40f).toInt()
-            if (lines != 0) scrollVisualBy(lines)
+            val lineHeight = textPaint.textSize
+            val lines = if (lineHeight > 0) (dy / lineHeight).toInt() else 0
+            if (lines != 0) buffer.scrollBy(lines)
             return true
         }
         override fun onSingleTapUp(e: MotionEvent): Boolean {
@@ -119,20 +119,6 @@ private class TerminalNativeView(
     override fun onTouchEvent(event: MotionEvent): Boolean {
         gestureDetector.onTouchEvent(event)
         return true
-    }
-
-    // visualScroll: number of visual rows scrolled relative to buffer.scrollTop
-    private var visualScroll: Int = 0
-
-    private fun scrollVisualBy(lines: Int) {
-        val measuredCharW = textPaint.measureText("M")
-        val tentativeCols = (width.toFloat() / measuredCharW).toInt().coerceAtLeast(1)
-        val drawColsLocal = tentativeCols.coerceAtMost(buffer.cols)
-        val wraps = (buffer.cols + drawColsLocal - 1) / drawColsLocal
-        val totalVisualRows = buffer.cells.size * wraps
-        val maxVisualOffset = (totalVisualRows - buffer.rows).coerceAtLeast(0)
-        visualScroll = (visualScroll + lines).coerceIn(0, maxVisualOffset)
-        invalidate()
     }
 
     override fun onCheckIsTextEditor(): Boolean = true
