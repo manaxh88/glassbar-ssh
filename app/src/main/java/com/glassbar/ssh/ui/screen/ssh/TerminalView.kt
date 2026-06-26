@@ -106,7 +106,7 @@ private class TerminalNativeView(
     private val gestureDetector = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
         override fun onScroll(e1: MotionEvent?, e2: MotionEvent, dx: Float, dy: Float): Boolean {
             // Invert dy: finger down → show content above
-            scrollFraction -= dy * 0.2f
+            scrollFraction -= dy * 0.4f
             val lines = scrollFraction.toInt()
             if (lines != 0) {
                 buffer.scrollBy(lines)
