@@ -50,8 +50,6 @@ fun VirtualKeyboard(
         modifier = modifier
             .fillMaxWidth()
             .background(Color(0xFFE8E8E8))
-            .imePadding()
-            .navigationBarsPadding()
             .padding(4.dp),
     ) {
         androidx.compose.foundation.layout.Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
