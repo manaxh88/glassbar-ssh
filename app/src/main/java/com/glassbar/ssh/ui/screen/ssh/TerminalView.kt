@@ -101,11 +101,17 @@ private class TerminalNativeView(
         }
     }
 
+    private var scrollFraction = 0f
+
     private val gestureDetector = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
         override fun onScroll(e1: MotionEvent?, e2: MotionEvent, dx: Float, dy: Float): Boolean {
-            val lineHeight = textPaint.textSize
-            val lines = if (lineHeight > 0) (dy / lineHeight).toInt() else 0
-            if (lines != 0) buffer.scrollBy(lines)
+            // Invert dy: finger down → show content above
+            scrollFraction -= dy * 0.6f
+            val lines = scrollFraction.toInt()
+            if (lines != 0) {
+                buffer.scrollBy(lines)
+                scrollFraction -= lines.toFloat()
+            }
             return true
         }
         override fun onSingleTapUp(e: MotionEvent): Boolean {
