@@ -58,10 +58,20 @@ fun SshScreen(
     val context = LocalContext.current
     val focusManager = LocalFocusManager.current
 
-    var host by remember(initialConnection) { mutableStateOf(initialConnection?.host ?: "") }
-    var port by remember(initialConnection) { mutableStateOf((initialConnection?.port ?: 22).toString()) }
-    var username by remember(initialConnection) { mutableStateOf(initialConnection?.username ?: "") }
-    var password by remember(initialConnection) { mutableStateOf(initialConnection?.password ?: "") }
+    var host by remember { mutableStateOf("") }
+    var port by remember { mutableStateOf("22") }
+    var username by remember { mutableStateOf("") }
+    var password by remember { mutableStateOf("") }
+
+    // Update fields when initialConnection changes
+    LaunchedEffect(initialConnection) {
+        initialConnection?.let {
+            host = it.host
+            port = it.port.toString()
+            username = it.username
+            password = it.password
+        }
+    }
 
     // 增加列数以获得更宽的终端视图（+20 列）
     val terminalBuffer = remember { TerminalBuffer(rows = 60, cols = 42) }
