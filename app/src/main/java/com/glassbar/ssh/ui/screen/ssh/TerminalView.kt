@@ -105,7 +105,7 @@ private class TerminalNativeView(
         override fun onScroll(e1: MotionEvent?, e2: MotionEvent, dx: Float, dy: Float): Boolean {
             // 取反 dy 以修正滑动方向（手指向上滑动显示更早的内容）
             val lines = (-dy / 40f).toInt()
-            if (lines != 0) buffer.scrollBy(lines)
+            if (lines != 0) scrollVisualBy(lines)
             return true
         }
         override fun onSingleTapUp(e: MotionEvent): Boolean {
@@ -121,10 +121,26 @@ private class TerminalNativeView(
         return true
     }
 
+    // visualScroll: number of visual rows scrolled relative to buffer.scrollTop
+    private var visualScroll: Int = 0
+
+    private fun scrollVisualBy(lines: Int) {
+        val measuredCharW = textPaint.measureText("M")
+        val tentativeCols = (width.toFloat() / measuredCharW).toInt().coerceAtLeast(1)
+        val drawColsLocal = tentativeCols.coerceAtMost(buffer.cols)
+        val wraps = (buffer.cols + drawColsLocal - 1) / drawColsLocal
+        val totalVisualRows = buffer.cells.size * wraps
+        val maxVisualOffset = (totalVisualRows - buffer.rows).coerceAtLeast(0)
+        visualScroll = (visualScroll + lines).coerceIn(0, maxVisualOffset)
+        invalidate()
+    }
+
     override fun onCheckIsTextEditor(): Boolean = true
 
     override fun onCreateInputConnection(outAttrs: android.view.inputmethod.EditorInfo): android.view.inputmethod.InputConnection {
-        outAttrs.inputType = android.text.InputType.TYPE_NULL
+        outAttrs.inputType = android.text.InputType.TYPE_CLASS_TEXT or
+                android.text.InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD or
+                android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
         outAttrs.imeOptions = android.view.inputmethod.EditorInfo.IME_FLAG_NO_FULLSCREEN
         return object : android.view.inputmethod.BaseInputConnection(this, false) {
             override fun commitText(text: CharSequence?, newCursorPosition: Int): Boolean {
