@@ -95,6 +95,7 @@ private class TerminalNativeView(
 
     var keyListener: (String) -> Unit = {}
     var onFocusChanged: (Boolean) -> Unit = {}
+    private val handler = android.os.Handler(android.os.Looper.getMainLooper())
 
     private var lastDeleteSurroundingTime = 0L
 
@@ -102,7 +103,7 @@ private class TerminalNativeView(
         isFocusable = true
         isFocusableInTouchMode = true
         setOnFocusChangeListener { _, hasFocus ->
-            onFocusChanged(hasFocus)
+            handler.post { onFocusChanged(hasFocus) }
             val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager
             if (hasFocus) {
                 imm.showSoftInput(this, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT)
