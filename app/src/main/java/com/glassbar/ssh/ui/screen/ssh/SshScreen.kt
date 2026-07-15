@@ -19,6 +19,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -74,11 +75,14 @@ fun SshScreen(
         }
     }
 
-    // 增加列数以获得更宽的终端视图（+20 列）
-    val terminalBuffer = remember { TerminalBuffer(rows = 60, cols = 42) }
+    val terminalBuffer = remember { TerminalBuffer(rows = 24, cols = 80) }
     val sshSession = remember { SshSession(terminalBuffer) }
     val connectionState by sshSession.state.collectAsStateWithLifecycle()
     val errorMessage by sshSession.errorMessage.collectAsStateWithLifecycle()
+
+    DisposableEffect(sshSession) {
+        onDispose { sshSession.disconnect() }
+    }
 
     val isConnected = connectionState == SshConnectionState.CONNECTED
     val isConnecting = connectionState == SshConnectionState.CONNECTING
@@ -280,6 +284,7 @@ fun SshScreen(
                 TerminalView(
                     buffer = terminalBuffer,
                     onKeyEvent = { key -> sshSession.send(key) },
+                    onResize = { cols, rows -> sshSession.resize(cols, rows) },
                     modifier = Modifier.fillMaxSize().weight(1f),
                 )
             }

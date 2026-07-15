@@ -7,7 +7,7 @@ import androidx.lifecycle.ViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import com.glassbar.ssh.ksuApp
+import com.glassbar.ssh.glassBarApp
 import com.glassbar.ssh.ui.UiMode
 import com.glassbar.ssh.ui.theme.ThemeController
 
@@ -15,7 +15,7 @@ class MainActivityViewModel(
     savedStateHandle: SavedStateHandle,
 ) : ViewModel() {
 
-    private val prefs = ksuApp.getSharedPreferences("settings", Context.MODE_PRIVATE)
+    private val prefs = glassBarApp.getSharedPreferences("settings", Context.MODE_PRIVATE)
     private val mainPageState = MainPageState(savedStateHandle)
 
     var pendingSshConnection: com.glassbar.ssh.ui.screen.ssh.SshConnectionInfo? = null
@@ -48,7 +48,7 @@ class MainActivityViewModel(
         // Read ui_mode from prefs, default to Miuix
         val uiModeValue = prefs.getString("ui_mode", UiMode.DEFAULT_VALUE) ?: UiMode.DEFAULT_VALUE
         return MainActivityUiState(
-            appSettings = ThemeController.getAppSettings(ksuApp),
+            appSettings = ThemeController.getAppSettings(glassBarApp),
             pageScale = pageScale,
             enableBlur = true,
             enableFloatingBottomBar = true,
@@ -82,7 +82,7 @@ private class MainPageState(
 }
 
 object MainPagerConfig {
-    const val PAGE_COUNT = 4
+    const val PAGE_COUNT = 2
     const val LAST_PAGE_INDEX = PAGE_COUNT - 1
 
     fun coercePage(page: Int): Int = page.coerceIn(0, LAST_PAGE_INDEX)

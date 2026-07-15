@@ -21,8 +21,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import top.yukonga.miuix.kmp.basic.Text
 
-private data class VKey(val label: String, val code: String, val wide: Float = 1f)
-
 @Composable
 fun VirtualKeyboard(
     onKey: (String) -> Unit,
@@ -39,7 +37,6 @@ fun VirtualKeyboard(
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
             ToolKey("Esc", "\u001B", keyH, 1f, onKey)
             ToolKey("Tab", "\t", keyH, 1f, onKey)
-            ToolKey("Ctrl", "", keyH, 1f, onKey)
             ToolKey("/", "/", keyH, 1f, onKey)
             ToolKey("-", "-", keyH, 1f, onKey)
             ToolKey("|", "|", keyH, 1f, onKey)
@@ -51,6 +48,12 @@ fun VirtualKeyboard(
             ToolKey("→", "\u001B[C", keyH, 1f, onKey)
             ToolKey("Tab", "\t", keyH, 1f, onKey)
             ToolKey("↵", "\r", keyH, 2f, onKey)
+        }
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+            ToolKey("Ctrl+C", "\u0003", keyH, 1f, onKey)
+            ToolKey("Ctrl+D", "\u0004", keyH, 1f, onKey)
+            ToolKey("Ctrl+Z", "\u001A", keyH, 1f, onKey)
+            ToolKey("Ctrl+L", "\u000C", keyH, 1f, onKey)
         }
     }
 }

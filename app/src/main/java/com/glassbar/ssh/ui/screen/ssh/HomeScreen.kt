@@ -21,6 +21,7 @@ import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Computer
 import androidx.compose.material.icons.rounded.Edit
+import androidx.compose.material.icons.rounded.Info
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -58,6 +59,7 @@ private val LightCardBg = Color(0xFFF5F5F5)
 fun HomeScreen(
     bottomPadding: Dp = 0.dp,
     onConnect: (SshConnectionInfo) -> Unit = {},
+    onAbout: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -103,18 +105,27 @@ fun HomeScreen(
                 fontWeight = FontWeight.Bold,
                 color = LightText,
             )
-            BlueButton(
-                onClick = { showAddDialog = true },
-                modifier = Modifier.height(40.dp),
-            ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
-                    imageVector = Icons.Rounded.Add,
-                    contentDescription = "添加",
-                    tint = Color.White,
-                    modifier = Modifier.size(18.dp),
+                    imageVector = Icons.Rounded.Info,
+                    contentDescription = "关于",
+                    tint = Color(0xFF1976D2),
+                    modifier = Modifier.size(24.dp).clickable(onClick = onAbout),
                 )
-                Spacer(Modifier.width(4.dp))
-                Text("添加", color = Color.White, fontSize = 13.sp)
+                Spacer(Modifier.width(14.dp))
+                BlueButton(
+                    onClick = { showAddDialog = true },
+                    modifier = Modifier.height(40.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Add,
+                        contentDescription = "添加",
+                        tint = Color.White,
+                        modifier = Modifier.size(18.dp),
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    Text("添加", color = Color.White, fontSize = 13.sp)
+                }
             }
         }
 

@@ -16,7 +16,7 @@ import com.materialkolor.rememberDynamicColorScheme
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-fun MaterialKernelSUTheme(
+fun MaterialGlassBarTheme(
     appSettings: AppSettings,
     content: @Composable () -> Unit
 ) {

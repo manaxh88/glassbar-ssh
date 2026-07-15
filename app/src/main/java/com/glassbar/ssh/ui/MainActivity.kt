@@ -47,10 +47,8 @@ import com.glassbar.ssh.ui.navigation3.rememberNavigator
 import com.glassbar.ssh.ui.screen.about.AboutScreen
 import com.glassbar.ssh.ui.screen.ssh.HomeScreen
 import com.glassbar.ssh.ui.screen.ssh.SshConnectionInfo
-import com.glassbar.ssh.ui.screen.placeholder.PlaceholderPage
-import com.glassbar.ssh.ui.screen.placeholder.PlaceholderScreen
 import com.glassbar.ssh.ui.screen.ssh.SshScreen
-import com.glassbar.ssh.ui.theme.KernelSUTheme
+import com.glassbar.ssh.ui.theme.GlassBarTheme
 import com.glassbar.ssh.ui.theme.LocalColorMode
 import com.glassbar.ssh.ui.theme.LocalEnableBlur
 import com.glassbar.ssh.ui.theme.LocalEnableFloatingBottomBar
@@ -110,7 +108,7 @@ class MainActivity : ComponentActivity() {
                 LocalEnableFloatingBottomBarBlur provides true,
                 LocalUiMode provides uiMode,
             ) {
-                KernelSUTheme(appSettings = appSettings, uiMode = uiMode) {
+                GlassBarTheme(appSettings = appSettings, uiMode = uiMode) {
                     val mainScreenEntry = @Composable {
                         MainScreen(
                             initialPage = selectedMainPage,
@@ -132,10 +130,6 @@ class MainActivity : ComponentActivity() {
                             entryProvider = entryProvider {
                                 entry<Route.Main> { mainScreenEntry() }
                                 entry<Route.About> { AboutScreen() }
-                                entry<Route.Home> { mainScreenEntry() }
-                                entry<Route.SuperUser> { mainScreenEntry() }
-                                entry<Route.Module> { mainScreenEntry() }
-                                entry<Route.Settings> { mainScreenEntry() }
                             }
                         )
                     }
@@ -209,14 +203,13 @@ fun MainScreen(
                         0 -> if (isCurrentPage || contentReady) HomeScreen(
                             bottomPadding = bottomInnerPadding,
                             onConnect = onSshConnectRequest,
+                            onAbout = { navController.push(Route.About) },
                         )
                         1 -> if (isCurrentPage || contentReady) SshScreen(
                             bottomPadding = bottomInnerPadding,
                             initialConnection = sshPendingConnection,
                             onConsumed = onConsumeSshPending,
                         )
-                        2 -> if (isCurrentPage || contentReady) PlaceholderScreen(PlaceholderPage.Module, bottomInnerPadding)
-                        3 -> if (isCurrentPage || contentReady) PlaceholderScreen(PlaceholderPage.Settings, bottomInnerPadding)
                     }
                 }
             }

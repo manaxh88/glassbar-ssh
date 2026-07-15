@@ -89,7 +89,7 @@ object ThemeController {
 }
 
 @Composable
-fun KernelSUTheme(
+fun GlassBarTheme(
     appSettings: AppSettings? = null,
     uiMode: UiMode = LocalUiMode.current,
     content: @Composable () -> Unit
@@ -98,12 +98,12 @@ fun KernelSUTheme(
     val currentAppSettings = appSettings ?: ThemeController.getAppSettings(context)
 
     when (uiMode) {
-        UiMode.Miuix -> MiuixKernelSUTheme(
+        UiMode.Miuix -> MiuixGlassBarTheme(
             appSettings = currentAppSettings,
             content = content
         )
 
-        UiMode.Material -> MaterialKernelSUTheme(
+        UiMode.Material -> MaterialGlassBarTheme(
             appSettings = currentAppSettings,
             content = content
         )

@@ -11,10 +11,13 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.InputStream
 import java.io.InputStreamReader
 import java.io.OutputStream
+import java.util.concurrent.atomic.AtomicLong
 
 enum class SshConnectionState {
     DISCONNECTED,
@@ -40,9 +43,10 @@ class SshSession(
     val errorMessage: StateFlow<String?> = _errorMessage.asStateFlow()
 
     private var ioScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
-    private val outputBuffer = TerminalOutputBuffer { text ->
-        terminalBuffer.write(text)
-    }
+    private val connectMutex = Mutex()
+    private val sendMutex = Mutex()
+    private val connectionGeneration = AtomicLong(0L)
+    private var outputBuffer: TerminalOutputBuffer? = null
 
     private var session: Session? = null
     private var channel: ChannelShell? = null
@@ -52,7 +56,9 @@ class SshSession(
 
     val isConnected: Boolean get() = _state.value == SshConnectionState.CONNECTED
 
-    suspend fun connect(config: SshConfig) = withContext(Dispatchers.IO) {
+    suspend fun connect(config: SshConfig) = connectMutex.withLock {
+      withContext(Dispatchers.IO) {
+        if (_state.value == SshConnectionState.CONNECTING) return@withContext
         if (_state.value == SshConnectionState.CONNECTED) {
             disconnect()
         }
@@ -60,6 +66,11 @@ class SshSession(
         _state.value = SshConnectionState.CONNECTING
         _errorMessage.value = null
         terminalBuffer.clear()
+        val generation = connectionGeneration.incrementAndGet()
+        val sessionOutput = TerminalOutputBuffer { text ->
+            if (connectionGeneration.get() == generation) terminalBuffer.write(text)
+        }
+        outputBuffer = sessionOutput
 
         try {
             val jsch = JSch()
@@ -70,42 +81,55 @@ class SshSession(
             sshProps.setProperty("PreferredAuthentications", "password,keyboard-interactive")
             JSch.setConfig(sshProps)
 
-            session = jsch.getSession(config.username, config.host, config.port)
-            session?.setPassword(config.password)
-            session?.setTimeout(10000)
-            session?.connect(10000)
+            val sshSession = jsch.getSession(config.username, config.host, config.port)
+            session = sshSession
+            sshSession.setPassword(config.password)
+            sshSession.setTimeout(10000)
+            sshSession.connect(10000)
 
-            channel = session?.openChannel("shell") as? ChannelShell
+            val shellChannel = sshSession.openChannel("shell") as? ChannelShell
                 ?: throw Exception("Failed to open shell channel")
+            channel = shellChannel
 
             // Request a pseudo-terminal
-            channel?.setPtySize(
+            shellChannel.setPtySize(
                 terminalBuffer.cols, terminalBuffer.rows,
                 terminalBuffer.cols * 8, terminalBuffer.rows * 16
             )
-            channel?.setPtyType("xterm-256color")
+            shellChannel.setPtyType("xterm-256color")
 
-            outputStream = channel?.outputStream
-            channel?.connect(5000)
-            inputStream = channel?.inputStream
-                ?: throw Exception("Failed to get input stream")
+            val shellOutput = shellChannel.outputStream
+            outputStream = shellOutput
+            shellChannel.connect(5000)
+            val shellInput = shellChannel.inputStream
+            inputStream = shellInput
+
+            // Mark connected before starting the reader so an immediate EOF is
+            // handled as a real remote disconnect rather than being missed.
+            _state.value = SshConnectionState.CONNECTED
 
             // Start read thread
             readThread = Thread {
-                val reader = InputStreamReader(inputStream, Charsets.UTF_8)
+                val reader = InputStreamReader(shellInput, Charsets.UTF_8)
                 val buf = CharArray(4096)
                 try {
                     while (!Thread.currentThread().isInterrupted) {
                         val n = reader.read(buf)
                         if (n == -1) break
                         val str = String(buf, 0, n)
-                        outputBuffer.add(str)
+                        sessionOutput.add(str)
+                    }
+                    if (!Thread.currentThread().isInterrupted &&
+                        connectionGeneration.get() == generation &&
+                        _state.value == SshConnectionState.CONNECTED
+                    ) {
+                        disconnectIfCurrent(generation)
                     }
                 } catch (e: Exception) {
-                    if (readThread?.isInterrupted == false) {
+                    if (readThread?.isInterrupted == false && connectionGeneration.get() == generation) {
                         val errMsg = "ERR: ${e.message ?: "unknown"}"
                         _errorMessage.value = errMsg
-                        terminalBuffer.write((errMsg + "\n").toByteArray())
+                        disconnectIfCurrent(generation)
                     }
                 }
             }.apply {
@@ -114,43 +138,64 @@ class SshSession(
                 start()
             }
 
-            _state.value = SshConnectionState.CONNECTED
         } catch (e: Exception) {
             _state.value = SshConnectionState.ERROR
             _errorMessage.value = e.message ?: "Connection failed"
-            disconnect()
+            disconnectIfCurrent(generation)
         }
+      }
     }
 
     fun send(data: String) {
         if (_state.value != SshConnectionState.CONNECTED) return
+        val generation = connectionGeneration.get()
         ioScope.launch {
-            try {
-                outputStream?.write(data.toByteArray(Charsets.UTF_8))
-                outputStream?.flush()
-            } catch (e: Exception) {
-                e.printStackTrace()
+            sendMutex.withLock {
+                if (generation != connectionGeneration.get() || _state.value != SshConnectionState.CONNECTED) return@withLock
+                try {
+                    outputStream?.write(data.toByteArray(Charsets.UTF_8))
+                    outputStream?.flush()
+                } catch (_: Exception) {
+                    // The reader/connection lifecycle reports disconnects.
+                }
             }
         }
     }
 
     fun send(bytes: ByteArray) {
         if (_state.value != SshConnectionState.CONNECTED) return
+        val generation = connectionGeneration.get()
         ioScope.launch {
-            try {
-                outputStream?.write(bytes)
-                outputStream?.flush()
-            } catch (e: Exception) {
-                e.printStackTrace()
+            sendMutex.withLock {
+                if (generation != connectionGeneration.get() || _state.value != SshConnectionState.CONNECTED) return@withLock
+                try {
+                    outputStream?.write(bytes)
+                    outputStream?.flush()
+                } catch (_: Exception) {
+                    // The reader/connection lifecycle reports disconnects.
+                }
             }
         }
     }
 
     fun resize(cols: Int, rows: Int) {
-        channel?.setPtySize(cols, rows, cols * 8, rows * 16)
+        if (cols <= 0 || rows <= 0 || _state.value != SshConnectionState.CONNECTED) return
+        runCatching { channel?.setPtySize(cols, rows, cols * 8, rows * 16) }
     }
 
     fun disconnect() {
+        connectionGeneration.incrementAndGet()
+        cleanupConnection()
+    }
+
+    private fun disconnectIfCurrent(generation: Long) {
+        if (!connectionGeneration.compareAndSet(generation, generation + 1)) return
+        cleanupConnection()
+    }
+
+    private fun cleanupConnection() {
+        outputBuffer?.clear()
+        outputBuffer = null
         ioScope.cancel()
         ioScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
         try {

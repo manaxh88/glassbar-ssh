@@ -9,9 +9,9 @@ import okhttp3.OkHttpClient
 import java.io.File
 import java.util.Locale
 
-lateinit var ksuApp: KernelSUApplication
+lateinit var glassBarApp: GlassBarApplication
 
-class KernelSUApplication : Application(), ViewModelStoreOwner {
+class GlassBarApplication : Application(), ViewModelStoreOwner {
 
     companion object {
         fun setEnableOnBackInvokedCallback(appInfo: android.content.pm.ApplicationInfo, enable: Boolean) {
@@ -32,7 +32,7 @@ class KernelSUApplication : Application(), ViewModelStoreOwner {
 
     override fun onCreate() {
         super.onCreate()
-        ksuApp = this
+        glassBarApp = this
 
         if (!isUserUnlocked()) {
             return

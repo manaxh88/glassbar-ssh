@@ -14,6 +14,7 @@ class TerminalOutputBuffer(
     private val chunks = LinkedList<String>()
     private var pendingChars = 0
     private var flushScheduled = false
+    private var flushRunnable: Runnable? = null
     private val flushIntervalMs = 16L
     private val maxCharsPerFlush = 32768
     private val handler = android.os.Handler(android.os.Looper.getMainLooper())
@@ -32,13 +33,18 @@ class TerminalOutputBuffer(
             if (flushScheduled) return
             flushScheduled = true
         }
-        handler.postDelayed({ doFlush() }, flushIntervalMs)
+        val runnable = Runnable { doFlush() }
+        synchronized(chunks) {
+            flushRunnable = runnable
+        }
+        handler.postDelayed(runnable, flushIntervalMs)
     }
 
     private fun doFlush() {
         var output = ""
         synchronized(chunks) {
             flushScheduled = false
+            flushRunnable = null
             if (pendingChars == 0) return
             var remaining = maxCharsPerFlush
             val sb = StringBuilder()
@@ -63,6 +69,16 @@ class TerminalOutputBuffer(
         // If more data remains, schedule next flush
         synchronized(chunks) {
             if (pendingChars > 0) scheduleFlush()
+        }
+    }
+
+    fun clear() {
+        synchronized(chunks) {
+            flushRunnable?.let(handler::removeCallbacks)
+            flushRunnable = null
+            flushScheduled = false
+            chunks.clear()
+            pendingChars = 0
         }
     }
 }

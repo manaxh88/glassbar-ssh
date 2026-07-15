@@ -1,5 +1,7 @@
 @file:Suppress("UnstableApiUsage")
 
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.agp.app)
     alias(libs.plugins.compose.compiler)
@@ -14,18 +16,26 @@ val androidMinSdkVersion: Int by rootProject.extra
 val androidTargetSdkVersion: Int by rootProject.extra
 val androidSourceCompatibility: JavaVersion by rootProject.extra
 val androidTargetCompatibility: JavaVersion by rootProject.extra
-val managerVersionCode: Int by rootProject.extra
-val managerVersionName: String by rootProject.extra
+val appVersionCode: Int by rootProject.extra
+val appVersionName: String by rootProject.extra
+val signingPropertiesFile = rootProject.file("sign.properties")
+val signingProperties = Properties().apply {
+    if (signingPropertiesFile.exists()) {
+        signingPropertiesFile.inputStream().use { load(it) }
+    }
+}
 
 android {
     namespace = "com.glassbar.ssh"
 
     signingConfigs {
-        create("release") {
-            storeFile = file("../glassbar.keystore")
-            storePassword = "glassbar123"
-            keyAlias = "glassbar"
-            keyPassword = "glassbar123"
+        if (signingPropertiesFile.exists()) {
+            create("release") {
+                storeFile = rootProject.file(signingProperties.getProperty("KEYSTORE_FILE"))
+                storePassword = signingProperties.getProperty("KEYSTORE_PASSWORD")
+                keyAlias = signingProperties.getProperty("KEY_ALIAS")
+                keyPassword = signingProperties.getProperty("KEY_PASSWORD")
+            }
         }
     }
 
@@ -34,7 +44,7 @@ android {
             // No native build in debug
         }
         release {
-            signingConfig = signingConfigs.getByName("release")
+            signingConfig = signingConfigs.findByName("release")
             isMinifyEnabled = true
             isShrinkResources = true
             vcsInfo.include = false
@@ -76,8 +86,8 @@ android {
     defaultConfig {
         minSdk = androidMinSdkVersion
         targetSdk = androidTargetSdkVersion
-        versionCode = managerVersionCode
-        versionName = managerVersionName
+        versionCode = appVersionCode
+        versionName = appVersionName
     }
 
     lint {
@@ -99,7 +109,7 @@ androidComponents {
 
 base {
     archivesName.set(
-        "GlassBar_${managerVersionName}_${managerVersionCode}"
+        "GlassBarSSH_${appVersionName}_${appVersionCode}"
     )
 }
 

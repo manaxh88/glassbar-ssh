@@ -29,8 +29,10 @@ object TerminalColors {
     fun fg(index: Int): Int = palette[index.coerceIn(0, 15)]
     fun bg(index: Int): Int = palette[index.coerceIn(0, 15)]
 
-    const val DEFAULT_FG = 7
-    const val DEFAULT_BG = 0
+    // Keep terminal defaults distinct from explicit ANSI white/black so the
+    // renderer can honor `37m` and `40m` on its light default surface.
+    const val DEFAULT_FG = -1
+    const val DEFAULT_BG = -1
 }
 
 /**
@@ -49,12 +51,26 @@ data class TerminalCell(
  * Terminal buffer that maintains a character grid and parses ANSI escape sequences.
  */
 class TerminalBuffer(
-    val rows: Int = 24,
-    val cols: Int = 80,
+    rows: Int = 24,
+    cols: Int = 80,
     val scrollbackLines: Int = 1000,
 ) {
-    private val totalRows = rows + scrollbackLines
-    val cells: Array<Array<TerminalCell>> = Array(totalRows) { Array(cols) { TerminalCell() } }
+    init {
+        require(rows > 0) { "rows must be positive" }
+        require(cols > 0) { "cols must be positive" }
+        require(scrollbackLines >= 0) { "scrollbackLines cannot be negative" }
+    }
+
+    var rows: Int = rows
+        private set
+    var cols: Int = cols
+        private set
+    private var totalRows = rows + scrollbackLines
+    var cells: Array<Array<TerminalCell>> = Array(totalRows) { Array(cols) { TerminalCell() } }
+        private set
+
+    /** Absolute first row of the active terminal screen. */
+    private var screenTop: Int = 0
 
     var cursorRow: Int = 0
         private set
@@ -64,7 +80,7 @@ class TerminalBuffer(
         private set
 
     /** Top of the visible area in the scrollback buffer */
-    var scrollTop: Int = scrollbackLines
+    var scrollTop: Int = 0
         private set
 
     private var currentFg: Int = TerminalColors.DEFAULT_FG
@@ -87,6 +103,48 @@ class TerminalBuffer(
         changeListeners.add(listener)
     }
 
+    fun removeChangeListener(listener: TerminalBuffer.() -> Unit) {
+        changeListeners.remove(listener)
+    }
+
+    /** Resize the logical terminal grid to match the native view and its PTY. */
+    fun resize(newRows: Int, newCols: Int) {
+        val targetRows = newRows.coerceAtLeast(1)
+        val targetCols = newCols.coerceAtLeast(1)
+        if (targetRows == rows && targetCols == cols) return
+
+        val oldRows = rows
+        val oldCols = cols
+        val oldScreenTop = screenTop
+        val oldCursorRow = cursorRow
+        val oldCursorRelative = (oldCursorRow - oldScreenTop).coerceIn(0, oldRows - 1)
+        val oldVisible = (oldScreenTop until oldScreenTop + oldRows)
+            .map { cells[it].copyOf() }
+
+        rows = targetRows
+        cols = targetCols
+        totalRows = rows + scrollbackLines
+        cells = Array(totalRows) { Array(cols) { TerminalCell(bg = currentBg) } }
+        screenTop = 0
+        scrollTop = 0
+        cursorCol = (cursorCol.coerceIn(0, oldCols - 1)).coerceIn(0, cols - 1)
+
+        val copyRows = minOf(oldRows, rows)
+        val copyCols = minOf(oldCols, cols)
+        val sourceRowStart = if (rows < oldRows) {
+            (oldCursorRelative - rows + 1).coerceIn(0, oldRows - rows)
+        } else {
+            0
+        }
+        cursorRow = (oldCursorRelative - sourceRowStart).coerceIn(0, rows - 1)
+        for (r in 0 until copyRows) {
+            for (c in 0 until copyCols) {
+                cells[r][c] = oldVisible[sourceRowStart + r][c]
+            }
+        }
+        notifyChange()
+    }
+
     private fun notifyChange() {
         for (listener in changeListeners) {
             listener(this)
@@ -97,6 +155,9 @@ class TerminalBuffer(
      * Feed raw bytes from SSH into the terminal parser.
      */
     fun write(data: ByteArray, offset: Int = 0, length: Int = data.size - offset) {
+        require(offset >= 0 && length >= 0 && offset <= data.size - length) {
+            "Invalid byte range: offset=$offset length=$length size=${data.size}"
+        }
         for (i in offset until offset + length) {
             processByte(data[i].toInt() and 0xFF)
         }
@@ -214,7 +275,7 @@ class TerminalBuffer(
                     'H', 'f' -> {
                         val row = if (p0 > 0) p0 - 1 else 0
                         val col = if (p1 > 0) p1 - 1 else 0
-                        cursorRow = (scrollTop + row).coerceIn(0, totalRows - 1)
+                        cursorRow = (screenTop + row).coerceIn(screenTop, screenTop + rows - 1)
                         cursorCol = col.coerceIn(0, cols - 1)
                     }
                     'J' -> eraseDisplay(p0)
@@ -249,48 +310,90 @@ class TerminalBuffer(
     }
 
     private fun putChar(ch: Char) {
-        if (cursorCol >= cols) {
+        val charWidth = if (isWideCharacter(ch)) 2 else 1
+        if (cursorCol >= cols || cursorCol + charWidth > cols) {
             cursorCol = 0
             lineFeed()
         }
         val row = cursorRow
         if (row in 0 until totalRows && cursorCol in 0 until cols) {
-            cells[row][cursorCol] = TerminalCell(
+            val cell = TerminalCell(
                 char = ch, fg = currentFg, bg = currentBg,
                 bold = currentBold, underline = currentUnderline, inverse = currentInverse,
             )
+            cells[row][cursorCol] = cell
+            if (charWidth == 2 && cursorCol + 1 < cols) {
+                // Reserve the trailing cell so following ASCII keeps its PTY column.
+                cells[row][cursorCol + 1] = cell.copy(char = ' ')
+            }
         }
-        cursorCol++
+        cursorCol += charWidth
+    }
+
+    private fun isWideCharacter(ch: Char): Boolean = when (ch.code) {
+        in 0x1100..0x115F,
+        in 0x2329..0x232A,
+        in 0x2E80..0x303E,
+        in 0x3040..0xA4CF,
+        in 0xAC00..0xD7A3,
+        in 0xF900..0xFAFF,
+        in 0xFE10..0xFE19,
+        in 0xFE30..0xFE6F,
+        in 0xFF00..0xFF60,
+        in 0xFFE0..0xFFE6 -> true
+        else -> false
     }
 
     private fun lineFeed() {
-        if (cursorRow < scrollTop + rows - 1) {
+        if (cursorRow < screenTop + rows - 1) {
             cursorRow++
         } else {
-            scrollUp()
+            appendHistoryLine()
         }
     }
 
     private fun reverseLineFeed() {
-        if (cursorRow > scrollTop) cursorRow--
+        if (cursorRow > screenTop) cursorRow--
+    }
+
+    /** Advance the active screen by one row while retaining scrollback. */
+    private fun appendHistoryLine() {
+        val viewportWasAtBottom = scrollTop == screenTop
+        if (screenTop < scrollbackLines) {
+            screenTop++
+            cursorRow++
+        } else {
+            for (r in 0 until totalRows - 1) {
+                cells[r] = cells[r + 1]
+            }
+            cells[totalRows - 1] = Array(cols) { TerminalCell(bg = currentBg) }
+            cursorRow = totalRows - 1
+            if (!viewportWasAtBottom && scrollTop > 0) scrollTop--
+        }
+        for (c in 0 until cols) {
+            cells[screenTop + rows - 1][c] = TerminalCell(bg = currentBg)
+        }
+        if (viewportWasAtBottom) scrollTop = screenTop
     }
 
     private fun scrollUp(count: Int = 1) {
-        val bottom = scrollTop + rows - 1
-        for (i in scrollTop until bottom - count + 1) {
-            for (j in 0 until cols) cells[i][j] = cells[i + count][j]
+        val amount = count.coerceIn(1, rows)
+        val bottom = screenTop + rows - 1
+        for (i in screenTop until bottom - amount + 1) {
+            for (j in 0 until cols) cells[i][j] = cells[i + amount][j]
         }
-        for (i in max(bottom - count + 1, scrollTop)..bottom) {
+        for (i in max(bottom - amount + 1, screenTop)..bottom) {
             for (j in 0 until cols) cells[i][j] = TerminalCell(bg = currentBg)
         }
     }
 
     private fun scrollDown(count: Int = 1) {
-        val bottom = scrollTop + rows - 1
-        for (i in bottom downTo scrollTop + count) {
-            for (j in 0 until cols) cells[i][j] = cells[i - count][j]
+        val amount = count.coerceIn(1, rows)
+        val bottom = screenTop + rows - 1
+        for (i in bottom downTo screenTop + amount) {
+            for (j in 0 until cols) cells[i][j] = cells[i - amount][j]
         }
-        for (i in scrollTop until scrollTop + count) {
+        for (i in screenTop until screenTop + amount) {
             for (j in 0 until cols) cells[i][j] = TerminalCell(bg = currentBg)
         }
     }
@@ -298,11 +401,11 @@ class TerminalBuffer(
     private fun eraseDisplay(param: Int) {
         val startRow: Int; val endRow: Int
         when (param) {
-            0 -> { eraseLine(0); startRow = cursorRow + 1; endRow = scrollTop + rows - 1 }
-            1 -> { startRow = scrollTop; endRow = cursorRow - 1; eraseLine(1) }
+            0 -> { eraseLine(0); startRow = cursorRow + 1; endRow = screenTop + rows - 1 }
+            1 -> { startRow = screenTop; endRow = cursorRow - 1; eraseLine(1) }
             else -> {
-                startRow = scrollTop; endRow = scrollTop + rows - 1
-                cursorRow = scrollTop; cursorCol = 0
+                startRow = screenTop; endRow = screenTop + rows - 1
+                cursorRow = screenTop; cursorCol = 0
             }
         }
         for (r in startRow..endRow) {
@@ -323,37 +426,43 @@ class TerminalBuffer(
     }
 
     private fun insertLines(count: Int) {
-        val bottom = scrollTop + rows - 1
-        for (i in bottom downTo cursorRow + count) {
-            for (j in 0 until cols) cells[i][j] = cells[i - count][j]
+        if (cursorRow !in screenTop..(screenTop + rows - 1)) return
+        val amount = count.coerceIn(1, screenTop + rows - cursorRow)
+        val bottom = screenTop + rows - 1
+        for (i in bottom downTo cursorRow + amount) {
+            for (j in 0 until cols) cells[i][j] = cells[i - amount][j]
         }
-        for (i in cursorRow until cursorRow + count) {
+        for (i in cursorRow until cursorRow + amount) {
             for (j in 0 until cols) cells[i][j] = TerminalCell(bg = currentBg)
         }
     }
 
     private fun deleteLines(count: Int) {
-        val bottom = scrollTop + rows - 1
-        for (i in cursorRow until bottom - count + 1) {
-            for (j in 0 until cols) cells[i][j] = cells[i + count][j]
+        if (cursorRow !in screenTop..(screenTop + rows - 1)) return
+        val amount = count.coerceIn(1, screenTop + rows - cursorRow)
+        val bottom = screenTop + rows - 1
+        for (i in cursorRow until bottom - amount + 1) {
+            for (j in 0 until cols) cells[i][j] = cells[i + amount][j]
         }
-        for (i in max(bottom - count + 1, cursorRow)..bottom) {
+        for (i in max(bottom - amount + 1, cursorRow)..bottom) {
             for (j in 0 until cols) cells[i][j] = TerminalCell(bg = currentBg)
         }
     }
 
     private fun deleteChars(count: Int) {
+        if (cursorRow !in 0 until totalRows) return
         for (c in cursorCol until cols - count) cells[cursorRow][c] = cells[cursorRow][c + count]
         for (c in max(cols - count, 0) until cols) cells[cursorRow][c] = TerminalCell(bg = currentBg)
     }
 
     private fun insertChars(count: Int) {
+        if (cursorRow !in 0 until totalRows) return
         for (c in cols - 1 downTo cursorCol + count) cells[cursorRow][c] = cells[cursorRow][c - count]
         for (c in cursorCol until min(cursorCol + count, cols)) cells[cursorRow][c] = TerminalCell(bg = currentBg)
     }
 
-    private fun cursorUp(n: Int) { cursorRow = max(cursorRow - n, scrollTop) }
-    private fun cursorDown(n: Int) { cursorRow = min(cursorRow + n, scrollTop + rows - 1) }
+    private fun cursorUp(n: Int) { cursorRow = max(cursorRow - n, screenTop) }
+    private fun cursorDown(n: Int) { cursorRow = min(cursorRow + n, screenTop + rows - 1) }
     private fun cursorForward(n: Int) { cursorCol = min(cursorCol + n, cols - 1) }
     private fun cursorBack(n: Int) { cursorCol = max(cursorCol - n, 0) }
 
@@ -388,7 +497,9 @@ class TerminalBuffer(
         for (r in 0 until totalRows) {
             for (c in 0 until cols) cells[r][c] = TerminalCell(bg = currentBg)
         }
-        cursorRow = scrollTop; cursorCol = 0
+        screenTop = 0
+        scrollTop = 0
+        cursorRow = 0; cursorCol = 0
         notifyChange()
     }
 
@@ -400,7 +511,13 @@ class TerminalBuffer(
      * Scroll the viewport by delta lines. Positive = scroll up (see older content).
      */
     fun scrollBy(delta: Int) {
-        scrollTop = (scrollTop - delta).coerceIn(0, totalRows - rows)
+        scrollTop = (scrollTop - delta).coerceIn(0, screenTop)
+        notifyChange()
+    }
+
+    fun scrollToBottom() {
+        if (scrollTop == screenTop) return
+        scrollTop = screenTop
         notifyChange()
     }
 

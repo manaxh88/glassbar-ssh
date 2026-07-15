@@ -28,7 +28,7 @@ import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.webkit.WebViewAssetLoader
-import com.glassbar.ssh.ksuApp
+import com.glassbar.ssh.glassBarApp
 import com.glassbar.ssh.ui.LocalUiMode
 import com.glassbar.ssh.ui.UiMode
 import com.glassbar.ssh.ui.theme.isInDarkTheme
@@ -80,7 +80,7 @@ fun GithubMarkdown(
 
     val template = remember(isDark) {
         val name = if (isDark) "webview/template_dark.html" else "webview/template.html"
-        ksuApp.assets.open(name).bufferedReader(StandardCharsets.UTF_8).use { it.readText() }
+        glassBarApp.assets.open(name).bufferedReader(StandardCharsets.UTF_8).use { it.readText() }
     }
     val extensions = remember {
         listOf(
@@ -237,7 +237,7 @@ fun GithubMarkdown(
                             assetLoader.shouldInterceptRequest(request.url)?.let { return it }
                             val scheme = request.url.scheme ?: return null
                             if (!scheme.startsWith("http")) return null
-                            val client: OkHttpClient = ksuApp.okhttpClient
+                            val client: OkHttpClient = glassBarApp.okhttpClient
                             val call = client.newCall(
                                 Request.Builder()
                                     .url(request.url.toString())
