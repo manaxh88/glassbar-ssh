@@ -82,6 +82,11 @@ android {
         compose = true
     }
 
+    packaging {
+        // CI distributes the debug APK directly; compressed dex keeps the artifact practical.
+        dex.useLegacyPackaging = true
+    }
+
     dependenciesInfo {
         includeInApk = false
         includeInBundle = false
