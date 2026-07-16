@@ -1,5 +1,6 @@
 package com.glassbar.ssh.ui.screen.ssh
 
+import android.app.Application
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -54,6 +55,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.compose.currentStateAsState
@@ -79,7 +81,11 @@ fun HomeScreen(
     onConnect: (SshConnectionInfo) -> Unit = {},
     onAbout: () -> Unit = {},
 ) {
-    val homeViewModel = viewModel<HomeViewModel>()
+    val application = LocalContext.current.applicationContext as Application
+    val homeViewModelFactory = remember(application) {
+        ViewModelProvider.AndroidViewModelFactory.getInstance(application)
+    }
+    val homeViewModel = viewModel<HomeViewModel>(factory = homeViewModelFactory)
     val connections by homeViewModel.connections.collectAsStateWithLifecycle()
     val serverStats by homeViewModel.serverStats.collectAsStateWithLifecycle()
     val refreshingIds by homeViewModel.refreshingIds.collectAsStateWithLifecycle()

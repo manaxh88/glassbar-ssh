@@ -44,10 +44,10 @@ fun VirtualKeyboard(
             ToolKey("|", "|", keyHeight, 1f, theme, onKey)
         }
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-            ToolKey("↑", "\u001B[A", keyHeight, 1f, theme, onKey)
-            ToolKey("↓", "\u001B[B", keyHeight, 1f, theme, onKey)
-            ToolKey("←", "\u001B[D", keyHeight, 1f, theme, onKey)
-            ToolKey("→", "\u001B[C", keyHeight, 1f, theme, onKey)
+            ToolKey("Up", "\u001B[A", keyHeight, 1f, theme, onKey)
+            ToolKey("Dn", "\u001B[B", keyHeight, 1f, theme, onKey)
+            ToolKey("Left", "\u001B[D", keyHeight, 1f, theme, onKey)
+            ToolKey("Right", "\u001B[C", keyHeight, 1f, theme, onKey)
             ToolKey("Enter", "\r", keyHeight, 2f, theme, onKey)
         }
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(3.dp)) {

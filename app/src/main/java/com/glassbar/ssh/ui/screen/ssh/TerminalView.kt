@@ -589,16 +589,27 @@ private class TerminalNativeView(
         outAttrs.inputType = android.text.InputType.TYPE_CLASS_TEXT or
             android.text.InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD or
             android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
-        outAttrs.imeOptions = EditorInfo.IME_FLAG_NO_FULLSCREEN
+        outAttrs.imeOptions = EditorInfo.IME_ACTION_NONE or
+            EditorInfo.IME_FLAG_NO_ENTER_ACTION or
+            EditorInfo.IME_FLAG_NO_EXTRACT_UI or
+            EditorInfo.IME_FLAG_NO_FULLSCREEN
         return object : BaseInputConnection(this, false) {
             override fun commitText(text: CharSequence?, newCursorPosition: Int): Boolean {
                 text?.toString()?.replace('\n', '\r')?.takeIf { it.isNotEmpty() }?.let(keyListener)
-                return super.commitText(text, newCursorPosition)
+                return true
             }
 
             override fun setComposingText(text: CharSequence?, newCursorPosition: Int): Boolean {
                 // Only committed text is forwarded, which avoids duplicate IME composition text.
-                return super.setComposingText(text, newCursorPosition)
+                return true
+            }
+
+            override fun finishComposingText(): Boolean {
+                return true
+            }
+
+            override fun setSelection(start: Int, end: Int): Boolean {
+                return true
             }
 
             override fun deleteSurroundingText(beforeLength: Int, afterLength: Int): Boolean {
@@ -832,7 +843,9 @@ private fun keyEventToString(event: KeyEvent): String? {
         }
     }
     val character = event.unicodeChar
-    if (character != 0) return character.toChar().toString()
+    if (character != 0 && Character.isValidCodePoint(character)) {
+        return String(Character.toChars(character))
+    }
     return when (event.keyCode) {
         KeyEvent.KEYCODE_ENTER -> "\r"
         KeyEvent.KEYCODE_DEL -> "\u007F"
