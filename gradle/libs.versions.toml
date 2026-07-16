@@ -8,7 +8,7 @@ kotlinx-coroutines = "1.11.0"
 navigation3 = "1.1.1"
 navigationevent = "1.1.1"
 materialKolor = "4.1.1"
-miuix = "0.9.1"
+miuix = "0.9.3"
 jsch = "0.2.26"
 junit4 = "4.13.2"
 
