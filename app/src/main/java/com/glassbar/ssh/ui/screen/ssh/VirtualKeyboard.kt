@@ -17,6 +17,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import top.yukonga.miuix.kmp.basic.Text
@@ -25,51 +26,62 @@ import top.yukonga.miuix.kmp.basic.Text
 fun VirtualKeyboard(
     onKey: (String) -> Unit,
     modifier: Modifier = Modifier,
+    theme: TerminalTheme = TerminalTheme.Light,
 ) {
-    val keyH = 36.dp
+    val keyHeight = 36.dp
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .background(Color(0xFFD1D1D1))
+            .background(Color(theme.keyboardBackground))
             .padding(3.dp),
         verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-            ToolKey("Esc", "\u001B", keyH, 1f, onKey)
-            ToolKey("Tab", "\t", keyH, 1f, onKey)
-            ToolKey("/", "/", keyH, 1f, onKey)
-            ToolKey("-", "-", keyH, 1f, onKey)
-            ToolKey("|", "|", keyH, 1f, onKey)
+            ToolKey("Esc", "\u001B", keyHeight, 1f, theme, onKey)
+            ToolKey("Tab", "\t", keyHeight, 1f, theme, onKey)
+            ToolKey("/", "/", keyHeight, 1f, theme, onKey)
+            ToolKey("-", "-", keyHeight, 1f, theme, onKey)
+            ToolKey("|", "|", keyHeight, 1f, theme, onKey)
         }
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-            ToolKey("↑", "\u001B[A", keyH, 1f, onKey)
-            ToolKey("↓", "\u001B[B", keyH, 1f, onKey)
-            ToolKey("←", "\u001B[D", keyH, 1f, onKey)
-            ToolKey("→", "\u001B[C", keyH, 1f, onKey)
-            ToolKey("Tab", "\t", keyH, 1f, onKey)
-            ToolKey("↵", "\r", keyH, 2f, onKey)
+            ToolKey("↑", "\u001B[A", keyHeight, 1f, theme, onKey)
+            ToolKey("↓", "\u001B[B", keyHeight, 1f, theme, onKey)
+            ToolKey("←", "\u001B[D", keyHeight, 1f, theme, onKey)
+            ToolKey("→", "\u001B[C", keyHeight, 1f, theme, onKey)
+            ToolKey("Enter", "\r", keyHeight, 2f, theme, onKey)
         }
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-            ToolKey("Ctrl+C", "\u0003", keyH, 1f, onKey)
-            ToolKey("Ctrl+D", "\u0004", keyH, 1f, onKey)
-            ToolKey("Ctrl+Z", "\u001A", keyH, 1f, onKey)
-            ToolKey("Ctrl+L", "\u000C", keyH, 1f, onKey)
+            ToolKey("Ctrl+C", "\u0003", keyHeight, 1f, theme, onKey)
+            ToolKey("Ctrl+D", "\u0004", keyHeight, 1f, theme, onKey)
+            ToolKey("Ctrl+Z", "\u001A", keyHeight, 1f, theme, onKey)
+            ToolKey("Ctrl+L", "\u000C", keyHeight, 1f, theme, onKey)
         }
     }
 }
 
 @Composable
 private fun RowScope.ToolKey(
-    label: String, code: String, height: androidx.compose.ui.unit.Dp,
-    weight: Float, onKey: (String) -> Unit,
+    label: String,
+    code: String,
+    height: Dp,
+    weight: Float,
+    theme: TerminalTheme,
+    onKey: (String) -> Unit,
 ) {
     Box(
         modifier = Modifier
-            .weight(weight).height(height)
-            .background(Color.White, RoundedCornerShape(6.dp))
-            .clickable { if (code.isNotEmpty()) onKey(code) },
+            .weight(weight)
+            .height(height)
+            .background(Color(theme.keyboardKeyBackground), RoundedCornerShape(6.dp))
+            .clickable { onKey(code) },
         contentAlignment = Alignment.Center,
     ) {
-        Text(label, fontSize = 13.sp, fontWeight = FontWeight.Medium, color = Color(0xFF333333), textAlign = TextAlign.Center)
+        Text(
+            label,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Medium,
+            color = Color(theme.keyboardKeyForeground),
+            textAlign = TextAlign.Center,
+        )
     }
 }

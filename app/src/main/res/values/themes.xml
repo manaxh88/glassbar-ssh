@@ -4,10 +4,4 @@
     <style name="Theme.GlassBar" parent="android:Theme.Material.Light.NoActionBar">
         <item name="android:windowLayoutInDisplayCutoutMode">shortEdges</item>
     </style>
-
-    <style name="Theme.GlassBar.WebUI" parent="Theme.GlassBar">
-        <item name="android:windowLightStatusBar">true</item>
-        <item name="android:windowLightNavigationBar">true</item>
-    </style>
-
 </resources>

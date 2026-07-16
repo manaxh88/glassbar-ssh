@@ -2,6 +2,7 @@ package com.glassbar.ssh.ui
 
 import android.annotation.SuppressLint
 import android.os.Bundle
+import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
@@ -51,8 +52,6 @@ import com.glassbar.ssh.ui.screen.ssh.SshScreen
 import com.glassbar.ssh.ui.theme.GlassBarTheme
 import com.glassbar.ssh.ui.theme.LocalColorMode
 import com.glassbar.ssh.ui.theme.LocalEnableBlur
-import com.glassbar.ssh.ui.theme.LocalEnableFloatingBottomBar
-import com.glassbar.ssh.ui.theme.LocalEnableFloatingBottomBarBlur
 import com.glassbar.ssh.ui.util.rememberBlurBackdrop
 import com.glassbar.ssh.ui.util.rememberContentReady
 import com.glassbar.ssh.ui.viewmodel.MainActivityViewModel
@@ -67,6 +66,7 @@ class MainActivity : ComponentActivity() {
     @SuppressLint("UnusedMaterial3ScaffoldPaddingParameter")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
 
         setContent {
             val mainVM = viewModel<MainActivityViewModel>()
@@ -104,8 +104,6 @@ class MainActivity : ComponentActivity() {
                 LocalDensity provides density,
                 LocalColorMode provides appSettings.colorMode.value,
                 LocalEnableBlur provides true,
-                LocalEnableFloatingBottomBar provides true,
-                LocalEnableFloatingBottomBarBlur provides true,
                 LocalUiMode provides uiMode,
             ) {
                 GlassBarTheme(appSettings = appSettings, uiMode = uiMode) {

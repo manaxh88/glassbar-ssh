@@ -1,9 +1,11 @@
 package com.glassbar.ssh.ui.screen.ssh
 
+import com.glassbar.ssh.glassBarApp
 import com.jcraft.jsch.ChannelShell
 import com.jcraft.jsch.JSch
 import com.jcraft.jsch.Session
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
@@ -11,6 +13,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -31,10 +34,16 @@ data class SshConfig(
     val port: Int = 22,
     val username: String = "",
     val password: String = "",
+    /** OpenSSH/PEM private-key bytes. They are never persisted by SshSession. */
+    val privateKey: ByteArray? = null,
+    val publicKey: ByteArray? = null,
+    val privateKeyPassphrase: ByteArray? = null,
+    val privateKeyName: String = "glassbar-imported-key",
 )
 
 class SshSession(
     private val terminalBuffer: TerminalBuffer,
+    private val knownHostsStore: SshKnownHostsStore = SshKnownHostsStore(glassBarApp),
 ) {
     private val _state = MutableStateFlow(SshConnectionState.DISCONNECTED)
     val state: StateFlow<SshConnectionState> = _state.asStateFlow()
@@ -42,11 +51,15 @@ class SshSession(
     private val _errorMessage = MutableStateFlow<String?>(null)
     val errorMessage: StateFlow<String?> = _errorMessage.asStateFlow()
 
+    private val _hostKeyStatus = MutableStateFlow<SshHostKeyStatus>(SshHostKeyStatus.NotChecked)
+    val hostKeyStatus: StateFlow<SshHostKeyStatus> = _hostKeyStatus.asStateFlow()
+
     private var ioScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private val connectMutex = Mutex()
-    private val sendMutex = Mutex()
+    private val lifecycleLock = Any()
     private val connectionGeneration = AtomicLong(0L)
     private var outputBuffer: TerminalOutputBuffer? = null
+    private var writerEndpoint: WriterEndpoint? = null
 
     private var session: Session? = null
     private var channel: ChannelShell? = null
@@ -57,39 +70,83 @@ class SshSession(
     val isConnected: Boolean get() = _state.value == SshConnectionState.CONNECTED
 
     suspend fun connect(config: SshConfig) = connectMutex.withLock {
-      withContext(Dispatchers.IO) {
+      try {
+       withContext(Dispatchers.IO) {
         if (_state.value == SshConnectionState.CONNECTING) return@withContext
         if (_state.value == SshConnectionState.CONNECTED) {
             disconnect()
         }
 
-        _state.value = SshConnectionState.CONNECTING
-        _errorMessage.value = null
+        val generation = synchronized(lifecycleLock) {
+            _state.value = SshConnectionState.CONNECTING
+            _errorMessage.value = null
+            _hostKeyStatus.value = SshHostKeyStatus.NotChecked
+            connectionGeneration.incrementAndGet()
+        }
         terminalBuffer.clear()
-        val generation = connectionGeneration.incrementAndGet()
         val sessionOutput = TerminalOutputBuffer { text ->
             if (connectionGeneration.get() == generation) terminalBuffer.write(text)
         }
-        outputBuffer = sessionOutput
+        if (!installOutputBuffer(generation, sessionOutput)) {
+            sessionOutput.close()
+            return@withContext
+        }
+        var connectingSession: Session? = null
+        var connectingChannel: ChannelShell? = null
+        val jsch = JSch()
 
         try {
-            val jsch = JSch()
-
-            // Disable strict host key checking
-            val sshProps = java.util.Properties()
-            sshProps.setProperty("StrictHostKeyChecking", "no")
-            sshProps.setProperty("PreferredAuthentications", "password,keyboard-interactive")
-            JSch.setConfig(sshProps)
+            config.privateKey?.let { privateKey ->
+                jsch.addIdentity(
+                    config.privateKeyName,
+                    privateKey,
+                    config.publicKey,
+                    config.privateKeyPassphrase,
+                )
+            }
+            jsch.setHostKeyRepository(
+                knownHostsStore.repository(config.host, config.port) { status ->
+                    synchronized(lifecycleLock) {
+                        if (connectionGeneration.get() == generation) {
+                            _hostKeyStatus.value = status
+                        }
+                    }
+                },
+            )
 
             val sshSession = jsch.getSession(config.username, config.host, config.port)
-            session = sshSession
-            sshSession.setPassword(config.password)
+            connectingSession = sshSession
+            if (!installSession(generation, sshSession)) {
+                sshSession.disconnect()
+                return@withContext
+            }
+            sshSession.setConfig("StrictHostKeyChecking", "yes")
+            sshSession.setConfig(
+                "PreferredAuthentications",
+                if (config.privateKey != null) {
+                    "publickey,password,keyboard-interactive"
+                } else {
+                    "password,keyboard-interactive"
+                },
+            )
+            if (config.password.isNotEmpty()) {
+                sshSession.setPassword(config.password)
+            }
             sshSession.setTimeout(10000)
             sshSession.connect(10000)
+            if (connectionGeneration.get() != generation) {
+                sshSession.disconnect()
+                return@withContext
+            }
 
             val shellChannel = sshSession.openChannel("shell") as? ChannelShell
                 ?: throw Exception("Failed to open shell channel")
-            channel = shellChannel
+            connectingChannel = shellChannel
+            if (!installChannel(generation, shellChannel)) {
+                shellChannel.disconnect()
+                sshSession.disconnect()
+                return@withContext
+            }
 
             // Request a pseudo-terminal
             shellChannel.setPtySize(
@@ -99,20 +156,23 @@ class SshSession(
             shellChannel.setPtyType("xterm-256color")
 
             val shellOutput = shellChannel.outputStream
-            outputStream = shellOutput
+            if (!installOutputStream(generation, shellOutput)) {
+                shellChannel.disconnect()
+                sshSession.disconnect()
+                return@withContext
+            }
             shellChannel.connect(5000)
+            if (connectionGeneration.get() != generation) {
+                shellChannel.disconnect()
+                sshSession.disconnect()
+                return@withContext
+            }
             val shellInput = shellChannel.inputStream
-            inputStream = shellInput
-
-            // Mark connected before starting the reader so an immediate EOF is
-            // handled as a real remote disconnect rather than being missed.
-            _state.value = SshConnectionState.CONNECTED
-
-            // Start read thread
-            readThread = Thread {
-                val reader = InputStreamReader(shellInput, Charsets.UTF_8)
+            val writerQueue = Channel<ByteArray>(Channel.BUFFERED)
+            val sshReader = Thread {
                 val buf = CharArray(4096)
                 try {
+                    val reader = InputStreamReader(shellInput, Charsets.UTF_8)
                     while (!Thread.currentThread().isInterrupted) {
                         val n = reader.read(buf)
                         if (n == -1) break
@@ -126,53 +186,184 @@ class SshSession(
                         disconnectIfCurrent(generation)
                     }
                 } catch (e: Exception) {
-                    if (readThread?.isInterrupted == false && connectionGeneration.get() == generation) {
+                    if (!Thread.currentThread().isInterrupted &&
+                        connectionGeneration.get() == generation
+                    ) {
                         val errMsg = "ERR: ${e.message ?: "unknown"}"
-                        _errorMessage.value = errMsg
-                        disconnectIfCurrent(generation)
+                        disconnectIfCurrent(
+                            generation,
+                            finalState = SshConnectionState.ERROR,
+                            errorMessage = errMsg,
+                        )
                     }
                 }
             }.apply {
                 name = "SSH-Reader"
                 isDaemon = true
-                start()
             }
 
-        } catch (e: Exception) {
-            _state.value = SshConnectionState.ERROR
-            _errorMessage.value = e.message ?: "Connection failed"
+            // Installing all runtime resources and publishing CONNECTED share
+            // the same lock as disconnect(), so a cancelled generation can
+            // never become connected after its final generation check.
+            val writerScope = synchronized(lifecycleLock) {
+                if (connectionGeneration.get() != generation) {
+                    null
+                } else {
+                    inputStream = shellInput
+                    writerEndpoint = WriterEndpoint(generation, writerQueue)
+                    readThread = sshReader
+                    _state.value = SshConnectionState.CONNECTED
+                    ioScope
+                }
+            }
+            if (writerScope == null) {
+                writerQueue.close()
+                shellChannel.disconnect()
+                sshSession.disconnect()
+                return@withContext
+            }
+            startWriter(writerScope, generation, writerQueue, shellOutput)
+            sshReader.start()
+
+        } catch (cancelled: CancellationException) {
+            connectingChannel?.runCatching { disconnect() }
+            connectingSession?.runCatching { disconnect() }
             disconnectIfCurrent(generation)
+            throw cancelled
+        } catch (e: Exception) {
+            connectingChannel?.runCatching { disconnect() }
+            connectingSession?.runCatching { disconnect() }
+            if (connectionGeneration.get() == generation) {
+                disconnectIfCurrent(
+                    generation,
+                    finalState = SshConnectionState.ERROR,
+                    errorMessage = hostKeyErrorMessage() ?: e.message ?: "Connection failed",
+                )
+            }
+        } finally {
+            // JSch wipes its password byte array when connect() completes.
+            // Explicitly remove parsed identities as soon as authentication is done.
+            runCatching { jsch.removeAllIdentity() }
         }
+       }
+      } catch (cancelled: CancellationException) {
+          // withContext can surface cancellation after its block has returned.
+          // Always tear down the matching runtime instead of publishing a
+          // late connected or error state.
+          disconnect()
+          throw cancelled
       }
     }
 
+    /**
+     * Persists the currently presented key only when the caller confirms the
+     * exact fingerprint shown to the user. Call [connect] again afterwards.
+     */
+    fun trustPendingHostKey(expectedFingerprintSha256: String): Boolean {
+        return synchronized(lifecycleLock) {
+            val presented = when (val status = _hostKeyStatus.value) {
+                is SshHostKeyStatus.Unknown -> status.presented
+                is SshHostKeyStatus.Changed -> status.presented
+                else -> return@synchronized false
+            }
+            if (presented.fingerprintSha256 != expectedFingerprintSha256) {
+                return@synchronized false
+            }
+
+            val trusted = runCatching {
+                knownHostsStore.trust(presented)
+                knownHostsStore.find(presented.host, presented.port)
+                    ?: error("Trusted SSH host key could not be reloaded")
+            }.getOrElse {
+                _errorMessage.value = "Failed to persist trusted SSH host key"
+                return@synchronized false
+            }
+            _hostKeyStatus.value = SshHostKeyStatus.Trusted(trusted)
+            true
+        }
+    }
+
+    fun forgetHostKey(host: String, port: Int) {
+        knownHostsStore.forget(host, port)
+        val current = _hostKeyStatus.value
+        val currentKey = when (current) {
+            is SshHostKeyStatus.Trusted -> current.hostKey
+            is SshHostKeyStatus.Unknown -> current.presented
+            is SshHostKeyStatus.Changed -> current.presented
+            SshHostKeyStatus.NotChecked -> null
+        }
+        if (currentKey?.host.equals(host, ignoreCase = true) && currentKey?.port == port) {
+            _hostKeyStatus.value = SshHostKeyStatus.NotChecked
+        }
+    }
+
     fun send(data: String) {
-        if (_state.value != SshConnectionState.CONNECTED) return
-        val generation = connectionGeneration.get()
-        ioScope.launch {
-            sendMutex.withLock {
-                if (generation != connectionGeneration.get() || _state.value != SshConnectionState.CONNECTED) return@withLock
-                try {
-                    outputStream?.write(data.toByteArray(Charsets.UTF_8))
-                    outputStream?.flush()
-                } catch (_: Exception) {
-                    // The reader/connection lifecycle reports disconnects.
+        val encoded = data.toByteArray(Charsets.UTF_8)
+        try {
+            send(encoded)
+        } finally {
+            encoded.fill(0)
+        }
+    }
+
+    fun send(bytes: ByteArray) {
+        val endpoint = synchronized(lifecycleLock) {
+            writerEndpoint?.takeIf {
+                _state.value == SshConnectionState.CONNECTED &&
+                    it.generation == connectionGeneration.get()
+            }
+        } ?: return
+        val ownedBytes = bytes.copyOf()
+        if (endpoint.queue.trySend(ownedBytes).isFailure) {
+            ownedBytes.fill(0)
+            synchronized(lifecycleLock) {
+                if (writerEndpoint === endpoint &&
+                    endpoint.generation == connectionGeneration.get()
+                ) {
+                    _errorMessage.value = "SSH input queue is full or closed"
                 }
             }
         }
     }
 
-    fun send(bytes: ByteArray) {
-        if (_state.value != SshConnectionState.CONNECTED) return
-        val generation = connectionGeneration.get()
-        ioScope.launch {
-            sendMutex.withLock {
-                if (generation != connectionGeneration.get() || _state.value != SshConnectionState.CONNECTED) return@withLock
-                try {
-                    outputStream?.write(bytes)
-                    outputStream?.flush()
-                } catch (_: Exception) {
-                    // The reader/connection lifecycle reports disconnects.
+    private fun startWriter(
+        scope: CoroutineScope,
+        generation: Long,
+        queue: Channel<ByteArray>,
+        output: OutputStream,
+    ) {
+        scope.launch {
+            try {
+                for (first in queue) {
+                    if (generation != connectionGeneration.get() ||
+                        _state.value != SshConnectionState.CONNECTED
+                    ) {
+                        first.fill(0)
+                        break
+                    }
+
+                    val chunks = ArrayList<ByteArray>()
+                    chunks += first
+                    var size = first.size
+                    while (size < 4 * 1024) {
+                        val next = queue.tryReceive().getOrNull() ?: break
+                        chunks += next
+                        size += next.size
+                    }
+                    try {
+                        chunks.forEach { chunk -> output.write(chunk) }
+                        output.flush()
+                    } finally {
+                        chunks.forEach { chunk -> chunk.fill(0) }
+                    }
+                }
+            } catch (error: Exception) {
+                if (generation == connectionGeneration.get()) {
+                    disconnectIfCurrent(
+                        generation,
+                        finalState = SshConnectionState.ERROR,
+                        errorMessage = error.message ?: "SSH input failed",
+                    )
                 }
             }
         }
@@ -180,20 +371,41 @@ class SshSession(
 
     fun resize(cols: Int, rows: Int) {
         if (cols <= 0 || rows <= 0 || _state.value != SshConnectionState.CONNECTED) return
-        runCatching { channel?.setPtySize(cols, rows, cols * 8, rows * 16) }
+        val activeChannel = synchronized(lifecycleLock) { channel }
+        runCatching { activeChannel?.setPtySize(cols, rows, cols * 8, rows * 16) }
     }
 
     fun disconnect() {
-        connectionGeneration.incrementAndGet()
-        cleanupConnection()
+        synchronized(lifecycleLock) {
+            connectionGeneration.incrementAndGet()
+            cleanupConnectionLocked(SshConnectionState.DISCONNECTED)
+            _errorMessage.value = null
+            _hostKeyStatus.value = SshHostKeyStatus.NotChecked
+        }
     }
 
-    private fun disconnectIfCurrent(generation: Long) {
-        if (!connectionGeneration.compareAndSet(generation, generation + 1)) return
-        cleanupConnection()
+    private fun disconnectIfCurrent(
+        generation: Long,
+        finalState: SshConnectionState = SshConnectionState.DISCONNECTED,
+        errorMessage: String? = null,
+    ) {
+        synchronized(lifecycleLock) {
+            if (connectionGeneration.get() != generation) return
+            connectionGeneration.incrementAndGet()
+            if (errorMessage != null) _errorMessage.value = errorMessage
+            cleanupConnectionLocked(finalState)
+        }
     }
 
-    private fun cleanupConnection() {
+    private fun cleanupConnectionLocked(finalState: SshConnectionState) {
+        writerEndpoint?.queue?.let { queue ->
+            queue.close()
+            while (true) {
+                val queued = queue.tryReceive().getOrNull() ?: break
+                queued.fill(0)
+            }
+        }
+        writerEndpoint = null
         outputBuffer?.clear()
         outputBuffer = null
         ioScope.cancel()
@@ -216,6 +428,55 @@ class SshSession(
             session?.disconnect()
         } catch (_: Exception) {}
         session = null
-        _state.value = SshConnectionState.DISCONNECTED
+        _state.value = finalState
     }
+
+    private fun installOutputBuffer(
+        generation: Long,
+        candidate: TerminalOutputBuffer,
+    ): Boolean = synchronized(lifecycleLock) {
+        if (connectionGeneration.get() != generation) false else {
+            outputBuffer = candidate
+            true
+        }
+    }
+
+    private fun installSession(generation: Long, candidate: Session): Boolean =
+        synchronized(lifecycleLock) {
+            if (connectionGeneration.get() != generation) false else {
+                session = candidate
+                true
+            }
+        }
+
+    private fun installChannel(generation: Long, candidate: ChannelShell): Boolean =
+        synchronized(lifecycleLock) {
+            if (connectionGeneration.get() != generation) false else {
+                channel = candidate
+                true
+            }
+        }
+
+    private fun installOutputStream(generation: Long, candidate: OutputStream): Boolean =
+        synchronized(lifecycleLock) {
+            if (connectionGeneration.get() != generation) false else {
+                outputStream = candidate
+                true
+            }
+        }
+
+    private fun hostKeyErrorMessage(): String? = when (val status = _hostKeyStatus.value) {
+        is SshHostKeyStatus.Unknown ->
+            "Unknown SSH host key (${status.presented.algorithm}) " +
+                status.presented.fingerprintSha256
+        is SshHostKeyStatus.Changed ->
+            "SSH host key changed. Expected ${status.trusted.fingerprintSha256}, " +
+                "received ${status.presented.fingerprintSha256}"
+        else -> null
+    }
+
+    private data class WriterEndpoint(
+        val generation: Long,
+        val queue: Channel<ByteArray>,
+    )
 }

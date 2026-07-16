@@ -16,11 +16,9 @@ fun AboutScreen() {
         title = stringResource(R.string.about),
         appName = stringResource(R.string.app_name),
         versionName = BuildConfig.VERSION_NAME,
-        links = emptyList(),
     )
     val actions = AboutScreenActions(
         onBack = dropUnlessResumed { navigator.pop() },
-        onOpenLink = {},
     )
 
     when (LocalUiMode.current) {

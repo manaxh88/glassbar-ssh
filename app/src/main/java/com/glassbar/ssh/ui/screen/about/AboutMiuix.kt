@@ -58,13 +58,10 @@ import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.flow.onEach
 import com.glassbar.ssh.R
 import com.glassbar.ssh.ui.component.miuix.effect.BgEffectBackground
-import com.glassbar.ssh.ui.component.miuix.effect.ColorBlendToken
 import com.glassbar.ssh.ui.theme.LocalEnableBlur
 import com.glassbar.ssh.ui.theme.isInDarkTheme
 import com.glassbar.ssh.ui.util.BlurredBar
 import com.glassbar.ssh.ui.util.rememberBlurBackdrop
-import top.yukonga.miuix.kmp.basic.Card
-import top.yukonga.miuix.kmp.basic.CardDefaults
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
@@ -81,7 +78,6 @@ import top.yukonga.miuix.kmp.blur.rememberLayerBackdrop
 import top.yukonga.miuix.kmp.blur.textureBlur
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.Back
-import top.yukonga.miuix.kmp.preference.ArrowPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme.colorScheme
 import top.yukonga.miuix.kmp.utils.overScrollVertical
 import top.yukonga.miuix.kmp.utils.scrollEndHaptic
@@ -152,7 +148,6 @@ fun AboutScreenMiuix(
         Box(modifier = if (barBlurBackdrop != null) Modifier.layerBackdrop(barBlurBackdrop) else Modifier) {
             AboutContent(
                 state = state,
-                actions = actions,
                 innerPadding = innerPadding,
                 topAppBarScrollBehavior = topAppBarScrollBehavior,
                 lazyListState = lazyListState,
@@ -166,7 +161,6 @@ fun AboutScreenMiuix(
 @Composable
 private fun AboutContent(
     state: AboutUiState,
-    actions: AboutScreenActions,
     innerPadding: PaddingValues,
     topAppBarScrollBehavior: ScrollBehavior,
     lazyListState: LazyListState,
@@ -183,10 +177,6 @@ private fun AboutContent(
     val effectBackground =
         remember(enableBlur) { isRuntimeShaderSupported() && enableBlur && Build.VERSION.SDK_INT >= Build.VERSION_CODES.VANILLA_ICE_CREAM }
 
-    val blendColors = remember(isInDark) {
-        if (isInDark) ColorBlendToken.Overlay_Thin_Light
-        else ColorBlendToken.Pured_Regular_Light
-    }
     val logoBlend = remember(isInDark) {
         if (isInDark) {
             listOf(
@@ -409,34 +399,6 @@ private fun AboutContent(
                         .fillParentMaxHeight()
                         .padding(bottom = innerPadding.calculateBottomPadding() + 12.dp),
                 ) {
-                    Card(
-                        modifier = Modifier
-                            .padding(horizontal = 12.dp)
-                            .then(
-                                if (enableBlur) {
-                                    Modifier.textureBlur(
-                                        backdrop = backdrop,
-                                        shape = RoundedCornerShape(16.dp),
-                                        blurRadius = 60f,
-                                        colors = BlurColors(blendColors = blendColors),
-                                        enabled = true,
-                                    )
-                                } else Modifier
-                            ),
-                        colors = CardDefaults.defaultColors(
-                            if (enableBlur) Color.Transparent else colorScheme.surfaceContainer,
-                            Color.Transparent,
-                        ),
-                    ) {
-                        state.links.forEach {
-                            ArrowPreference(
-                                title = it.fullText,
-                                onClick = {
-                                    actions.onOpenLink(it.url)
-                                }
-                            )
-                        }
-                    }
                     Spacer(
                         Modifier.height(
                             WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() +

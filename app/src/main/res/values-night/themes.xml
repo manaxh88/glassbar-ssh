@@ -4,7 +4,4 @@
     <style name="Theme.GlassBar" parent="android:Theme.Material.NoActionBar">
         <item name="android:windowLayoutInDisplayCutoutMode">shortEdges</item>
     </style>
-
-    <style name="Theme.GlassBar.WebUI" parent="Theme.GlassBar" />
-
 </resources>

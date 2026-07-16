@@ -1,13 +1,27 @@
 package com.glassbar.ssh.ui.screen.ssh
 
+import android.annotation.SuppressLint
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Paint
+import android.graphics.Rect
 import android.graphics.Typeface
+import android.util.TypedValue
+import android.view.ActionMode
 import android.view.GestureDetector
 import android.view.KeyEvent
+import android.view.Menu
+import android.view.MenuItem
 import android.view.MotionEvent
+import android.view.ScaleGestureDetector
 import android.view.View
+import android.view.inputmethod.BaseInputConnection
+import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InputConnection
+import android.view.inputmethod.InputMethodManager
+import java.util.concurrent.atomic.AtomicBoolean
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
@@ -28,27 +42,109 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
-import kotlinx.coroutines.delay
+import kotlin.math.abs
+import kotlin.math.ceil
+import kotlin.math.floor
 
-private val TermFg = android.graphics.Color.rgb(26, 26, 26)
-private val TermBg = android.graphics.Color.rgb(250, 250, 250)
+/** Colors used for terminal defaults and the supplementary keyboard. */
+data class TerminalTheme(
+    val foreground: Int,
+    val background: Int,
+    val cursor: Int,
+    val selection: Int,
+    val keyboardBackground: Int,
+    val keyboardKeyBackground: Int,
+    val keyboardKeyForeground: Int,
+) {
+    companion object {
+        val Light = TerminalTheme(
+            foreground = 0xFF1A1A1A.toInt(),
+            background = 0xFFFAFAFA.toInt(),
+            cursor = 0x99000000.toInt(),
+            selection = 0x664A90E2,
+            keyboardBackground = 0xFFD1D1D1.toInt(),
+            keyboardKeyBackground = 0xFFFFFFFF.toInt(),
+            keyboardKeyForeground = 0xFF333333.toInt(),
+        )
+        val Dark = TerminalTheme(
+            foreground = 0xFFE7E7E7.toInt(),
+            background = 0xFF101114.toInt(),
+            cursor = 0x99FFFFFF.toInt(),
+            selection = 0x6672A7FF,
+            keyboardBackground = 0xFF22252A.toInt(),
+            keyboardKeyBackground = 0xFF353940.toInt(),
+            keyboardKeyForeground = 0xFFF2F2F2.toInt(),
+        )
+    }
+}
+
+/**
+ * Imperative bridge for toolbar actions outside [TerminalView]. Long-pressing the terminal also
+ * exposes Android's native Copy/Paste action mode, so using a controller is optional.
+ */
+class TerminalController {
+    private var copyAction: () -> String? = { null }
+    private var pasteClipboardAction: () -> Boolean = { false }
+    private var pasteTextAction: (String) -> Unit = {}
+    private var clearSelectionAction: () -> Unit = {}
+    private var setFontScaleAction: (Float) -> Unit = {}
+    private var requestFocusAction: () -> Unit = {}
+
+    fun copySelection(): String? = copyAction()
+    fun pasteFromClipboard(): Boolean = pasteClipboardAction()
+    fun paste(text: String) = pasteTextAction(text)
+    fun clearSelection() = clearSelectionAction()
+    fun setFontScale(scale: Float) = setFontScaleAction(scale)
+    fun requestFocus() = requestFocusAction()
+
+    internal fun attach(
+        copy: () -> String?,
+        pasteClipboard: () -> Boolean,
+        pasteText: (String) -> Unit,
+        clearSelection: () -> Unit,
+        setFontScale: (Float) -> Unit,
+        requestFocus: () -> Unit,
+    ) {
+        copyAction = copy
+        pasteClipboardAction = pasteClipboard
+        pasteTextAction = pasteText
+        clearSelectionAction = clearSelection
+        setFontScaleAction = setFontScale
+        requestFocusAction = requestFocus
+    }
+
+    internal fun detach() {
+        copyAction = { null }
+        pasteClipboardAction = { false }
+        pasteTextAction = {}
+        clearSelectionAction = {}
+        setFontScaleAction = {}
+        requestFocusAction = {}
+    }
+}
+
+@Composable
+fun rememberTerminalController(): TerminalController = remember { TerminalController() }
 
 @Composable
 fun TerminalView(
     buffer: TerminalBuffer,
     onKeyEvent: (String) -> Unit,
-    onResize: (cols: Int, rows: Int) -> Unit = { _, _ -> },
     modifier: Modifier = Modifier,
+    onResize: (cols: Int, rows: Int) -> Unit = { _, _ -> },
     focusRequester: FocusRequester = remember { FocusRequester() },
+    controller: TerminalController = rememberTerminalController(),
+    theme: TerminalTheme = TerminalTheme.Light,
+    fontScale: Float = 1f,
+    onFontScaleChange: (Float) -> Unit = {},
+    onSelectionChange: (TerminalSelection?) -> Unit = {},
+    onCopyText: (String) -> Unit = {},
 ) {
     val context = LocalContext.current
     var showVirtualKeyboard by remember { mutableStateOf(false) }
+    val terminalView = remember(context, buffer) { TerminalNativeView(context, buffer) }
 
-    val terminalView = remember(context, buffer) {
-        TerminalNativeView(context, buffer)
-    }
-    // The callback can change while the native view is retained by AndroidView.
-    // Keep the view from sending input to a stale session after reconnecting.
+    // Callbacks can change while AndroidView retains the native view across recompositions.
     LaunchedEffect(onKeyEvent, terminalView, buffer) {
         terminalView.keyListener = { key ->
             buffer.scrollToBottom()
@@ -58,31 +154,43 @@ fun TerminalView(
     LaunchedEffect(terminalView) {
         terminalView.onFocusChanged = { showVirtualKeyboard = it }
     }
-
     LaunchedEffect(onResize, terminalView) {
         terminalView.onTerminalSizeChanged = onResize
     }
+    LaunchedEffect(onFontScaleChange, terminalView) {
+        terminalView.onFontScaleChanged = onFontScaleChange
+    }
+    LaunchedEffect(onSelectionChange, terminalView) {
+        terminalView.onSelectionChanged = onSelectionChange
+    }
+    LaunchedEffect(onCopyText, terminalView) {
+        terminalView.onTextCopied = onCopyText
+    }
+    LaunchedEffect(fontScale, terminalView) {
+        terminalView.setFontScale(fontScale, notify = false)
+    }
 
     DisposableEffect(buffer, terminalView) {
-        val listener: TerminalBuffer.() -> Unit = {
-            terminalView.postInvalidate()
-        }
+        val listener: TerminalBuffer.() -> Unit = { terminalView.onBufferChanged() }
         buffer.addChangeListener(listener)
         onDispose { buffer.removeChangeListener(listener) }
     }
-
-    LaunchedEffect(terminalView) {
-        while (true) {
-            delay(250)
-            terminalView.invalidate()
-        }
+    DisposableEffect(controller, terminalView) {
+        controller.attach(
+            copy = terminalView::copySelectionToClipboard,
+            pasteClipboard = terminalView::pasteFromClipboard,
+            pasteText = terminalView::pasteText,
+            clearSelection = terminalView::clearSelection,
+            setFontScale = { terminalView.setFontScale(it, notify = true) },
+            requestFocus = terminalView::focusAndShowKeyboard,
+        )
+        onDispose { controller.detach() }
     }
-
-    // Terminal gets focus on tap — no auto-focus to avoid showing keyboard initially
 
     Column(modifier = modifier) {
         AndroidView(
             factory = { terminalView },
+            update = { it.theme = theme },
             modifier = Modifier
                 .weight(1f)
                 .fillMaxSize()
@@ -99,123 +207,437 @@ fun TerminalView(
                     buffer.scrollToBottom()
                     onKeyEvent(key)
                 },
+                theme = theme,
                 modifier = Modifier.fillMaxWidth(),
             )
         }
     }
 }
 
+@SuppressLint("ViewConstructor")
 private class TerminalNativeView(
     context: Context,
     private val buffer: TerminalBuffer,
 ) : View(context) {
-
     var keyListener: (String) -> Unit = {}
     var onFocusChanged: (Boolean) -> Unit = {}
     var onTerminalSizeChanged: (cols: Int, rows: Int) -> Unit = { _, _ -> }
-    private val handler = android.os.Handler(android.os.Looper.getMainLooper())
+    var onFontScaleChanged: (Float) -> Unit = {}
+    var onSelectionChanged: (TerminalSelection?) -> Unit = {}
+    var onTextCopied: (String) -> Unit = {}
 
+    var theme: TerminalTheme = TerminalTheme.Light
+        set(value) {
+            if (field == value) return
+            field = value
+            invalidate()
+        }
+
+    private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private val drawClipBounds = Rect()
+    private val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+    private val inputMethodManager =
+        context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+
+    private val baseTextSizePx = TypedValue.applyDimension(
+        TypedValue.COMPLEX_UNIT_SP,
+        16f,
+        resources.displayMetrics,
+    )
+    private var terminalFontScale = 1f
+    private var lastColumns = -1
+    private var lastRows = -1
     private var lastDeleteSurroundingTime = 0L
+    private var scrollFraction = 0f
+
+    private var selection: TerminalSelection? = null
+    private var selectionAnchor: TerminalPosition? = null
+    private var draggingSelection = false
+    private var selectionActionMode: ActionMode? = null
+    private val renderScheduled = AtomicBoolean(false)
+
+    private var cursorPhaseVisible = true
+    private val cursorBlinkRunnable = object : Runnable {
+        override fun run() {
+            if (!isAttachedToWindow) return
+            val snapshot = buffer.snapshot()
+            if (!isCursorVisibleInViewport(snapshot)) return
+            cursorPhaseVisible = !cursorPhaseVisible
+            invalidateCursor(snapshot)
+            mainHandler.postDelayed(this, CURSOR_BLINK_MS)
+        }
+    }
+
+    private val applyBufferChangeRunnable = Runnable {
+        renderScheduled.set(false)
+        if (!isAttachedToWindow) return@Runnable
+        if (selection != null) clearSelection()
+        cursorPhaseVisible = true
+        restartCursorBlink()
+        invalidate()
+    }
+
+    private val enqueueBufferChangeRunnable = Runnable {
+        if (!isAttachedToWindow) {
+            renderScheduled.set(false)
+            return@Runnable
+        }
+        postOnAnimation(applyBufferChangeRunnable)
+    }
+
+    private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        typeface = Typeface.MONOSPACE
+    }
+    private val backgroundPaint = Paint()
+    private val cursorPaint = Paint()
+    private val drawCharacter = CharArray(1)
 
     init {
         isFocusable = true
         isFocusableInTouchMode = true
         setOnFocusChangeListener { _, hasFocus ->
-            handler.post { onFocusChanged(hasFocus) }
-            val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager
-            if (hasFocus) imm.showSoftInput(this, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT)
-            else imm.hideSoftInputFromWindow(windowToken, 0)
+            mainHandler.post { onFocusChanged(hasFocus) }
+            if (hasFocus) {
+                inputMethodManager.showSoftInput(this, 0)
+            } else {
+                inputMethodManager.hideSoftInputFromWindow(windowToken, 0)
+            }
         }
     }
 
-    private var scrollFraction = 0f
+    fun onBufferChanged() {
+        // Coalesce arbitrarily many parser batches into at most one redraw per display frame.
+        if (renderScheduled.compareAndSet(false, true)) {
+            mainHandler.post(enqueueBufferChangeRunnable)
+        }
+    }
+
+    fun setFontScale(scale: Float, notify: Boolean) {
+        val next = scale.coerceIn(MIN_FONT_SCALE, MAX_FONT_SCALE)
+        if (abs(next - terminalFontScale) < 0.005f) return
+        terminalFontScale = next
+        recalculateTerminalSize()
+        invalidate()
+        if (notify) onFontScaleChanged(next)
+    }
+
+    fun focusAndShowKeyboard() {
+        if (!hasFocus()) requestFocus()
+        inputMethodManager.showSoftInput(this, 0)
+    }
+
+    fun pasteText(text: String) {
+        if (text.isEmpty()) return
+        val normalized = text.replace("\r\n", "\n").replace('\r', '\n')
+        if (buffer.snapshot().bracketedPasteMode) {
+            keyListener("\u001B[200~$normalized\u001B[201~")
+        } else {
+            keyListener(normalized.replace('\n', '\r'))
+        }
+    }
+
+    fun pasteFromClipboard(): Boolean {
+        val clip = clipboard.primaryClip ?: return false
+        if (clip.itemCount == 0) return false
+        val text = clip.getItemAt(0).coerceToText(context)?.toString().orEmpty()
+        if (text.isEmpty()) return false
+        pasteText(text)
+        return true
+    }
+
+    fun copySelectionToClipboard(): String? {
+        val current = selection ?: return null
+        val text = buffer.textInRange(current)
+        clipboard.setPrimaryClip(ClipData.newPlainText("Terminal text", text))
+        onTextCopied(text)
+        selectionActionMode?.finish()
+        return text
+    }
+
+    fun clearSelection() {
+        if (selection == null && selectionActionMode == null) return
+        selection = null
+        selectionAnchor = null
+        draggingSelection = false
+        val mode = selectionActionMode
+        selectionActionMode = null
+        mode?.finish()
+        onSelectionChanged(null)
+        invalidate()
+    }
+
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        restartCursorBlink()
+    }
+
+    override fun onDetachedFromWindow() {
+        mainHandler.removeCallbacks(cursorBlinkRunnable)
+        mainHandler.removeCallbacks(enqueueBufferChangeRunnable)
+        removeCallbacks(applyBufferChangeRunnable)
+        renderScheduled.set(false)
+        selectionActionMode?.finish()
+        selectionActionMode = null
+        super.onDetachedFromWindow()
+    }
 
     override fun onSizeChanged(width: Int, height: Int, oldWidth: Int, oldHeight: Int) {
         super.onSizeChanged(width, height, oldWidth, oldHeight)
-        if (width <= 0 || height <= 0) return
-        val charWidth = textPaint.measureText("M").coerceAtLeast(1f)
-        val lineHeight = (textPaint.fontMetrics.descent - textPaint.fontMetrics.ascent)
-            .coerceAtLeast(1f)
-        val cols = (width / charWidth).toInt().coerceIn(8, 240)
-        val rows = (height / lineHeight).toInt().coerceIn(4, 120)
-        buffer.resize(rows, cols)
-        onTerminalSizeChanged(cols, rows)
+        recalculateTerminalSize()
     }
 
-    private val gestureDetector = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
-        override fun onScroll(e1: MotionEvent?, e2: MotionEvent, dx: Float, dy: Float): Boolean {
-            // Invert dy: finger down → show content above
-            scrollFraction -= dy * 0.4f
-            val lines = scrollFraction.toInt()
-            if (lines != 0) {
-                buffer.scrollBy(lines)
-                scrollFraction -= lines.toFloat()
+    private fun recalculateTerminalSize() {
+        if (width <= 0 || height <= 0) return
+        textPaint.textSize = baseTextSizePx * terminalFontScale
+        val charWidth = textPaint.measureText("M").coerceAtLeast(1f)
+        val metrics = textPaint.fontMetrics
+        val lineHeight = ((metrics.descent - metrics.ascent) * LINE_SPACING).coerceAtLeast(1f)
+        val columns = (width / charWidth).toInt().coerceIn(8, 240)
+        val rows = (height / lineHeight).toInt().coerceIn(4, 120)
+        if (columns == lastColumns && rows == lastRows) return
+        lastColumns = columns
+        lastRows = rows
+        buffer.resize(rows, columns)
+        onTerminalSizeChanged(columns, rows)
+    }
+
+    private val scaleDetector = ScaleGestureDetector(
+        context,
+        object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
+            override fun onScale(detector: ScaleGestureDetector): Boolean {
+                setFontScale(terminalFontScale * detector.scaleFactor, notify = true)
+                return true
             }
-            return true
-        }
-        override fun onSingleTapUp(e: MotionEvent): Boolean {
-            if (hasFocus()) {
-                clearFocus()
-            } else {
-                requestFocus()
+        },
+    )
+
+    private val gestureDetector = GestureDetector(
+        context,
+        object : GestureDetector.SimpleOnGestureListener() {
+            override fun onDown(event: MotionEvent): Boolean = true
+
+            override fun onScroll(
+                firstEvent: MotionEvent?,
+                currentEvent: MotionEvent,
+                distanceX: Float,
+                distanceY: Float,
+            ): Boolean {
+                if (draggingSelection) {
+                    updateSelection(currentEvent)
+                    return true
+                }
+                scrollFraction -= distanceY * SCROLL_SENSITIVITY
+                val lines = scrollFraction.toInt()
+                if (lines != 0) {
+                    buffer.scrollBy(lines)
+                    scrollFraction -= lines.toFloat()
+                }
+                return true
             }
-            return true
-        }
-    })
+
+            override fun onSingleTapUp(event: MotionEvent): Boolean {
+                clearSelection()
+                return performClick()
+            }
+
+            override fun onLongPress(event: MotionEvent) {
+                val position = positionAt(event.x, event.y) ?: return
+                selectionAnchor = position
+                selection = TerminalSelection(position, position)
+                draggingSelection = true
+                onSelectionChanged(selection)
+                invalidate()
+                showSelectionActionMode()
+            }
+
+            override fun onDoubleTap(event: MotionEvent): Boolean {
+                selectWordAt(event.x, event.y)
+                return true
+            }
+        },
+    )
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
-        gestureDetector.onTouchEvent(event)
+        if (event.actionMasked == MotionEvent.ACTION_DOWN) {
+            parent?.requestDisallowInterceptTouchEvent(true)
+        }
+        scaleDetector.onTouchEvent(event)
+        if (!scaleDetector.isInProgress) gestureDetector.onTouchEvent(event)
+
+        if (draggingSelection && event.actionMasked == MotionEvent.ACTION_MOVE) {
+            updateSelection(event)
+        }
+        if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) {
+            draggingSelection = false
+            parent?.requestDisallowInterceptTouchEvent(false)
+        }
         return true
+    }
+
+    override fun performClick(): Boolean {
+        super.performClick()
+        // A click always focuses and opens input; it no longer toggles focus off.
+        focusAndShowKeyboard()
+        return true
+    }
+
+    private fun positionAt(x: Float, y: Float): TerminalPosition? {
+        val snapshot = buffer.snapshot()
+        if (width <= 0 || height <= 0 || snapshot.cols <= 0 || snapshot.rows <= 0) return null
+        val cellWidth = width.toFloat() / snapshot.cols
+        val cellHeight = height.toFloat() / snapshot.rows
+        val column = (x / cellWidth).toInt().coerceIn(0, snapshot.cols - 1)
+        val visibleRow = (y / cellHeight).toInt().coerceIn(0, snapshot.rows - 1)
+        val row = snapshot.lines[visibleRow]
+        val snappedColumn = if (row[column].wideContinuation && column > 0) column - 1 else column
+        return TerminalPosition(snapshot.viewportTop + visibleRow, snappedColumn)
+    }
+
+    private fun updateSelection(event: MotionEvent) {
+        val anchor = selectionAnchor ?: return
+        val end = positionAt(event.x, event.y) ?: return
+        val next = TerminalSelection(anchor, end)
+        if (next == selection) return
+        selection = next
+        onSelectionChanged(next)
+        selectionActionMode?.invalidate()
+        invalidate()
+    }
+
+    private fun selectWordAt(x: Float, y: Float) {
+        val position = positionAt(x, y) ?: return
+        val snapshot = buffer.snapshot()
+        val visibleRow = position.row - snapshot.viewportTop
+        val row = snapshot.lines.getOrNull(visibleRow) ?: return
+        var first = position.col.coerceIn(0, row.size - 1)
+        var last = first
+        fun isWordCell(index: Int): Boolean {
+            val cell = row[index]
+            return !cell.wideContinuation && !cell.char.isWhitespace()
+        }
+        if (isWordCell(first)) {
+            while (first > 0 && isWordCell(first - 1)) first--
+            while (last + 1 < row.size && isWordCell(last + 1)) last++
+        }
+        selectionAnchor = TerminalPosition(position.row, first)
+        selection = TerminalSelection(selectionAnchor!!, TerminalPosition(position.row, last))
+        draggingSelection = false
+        onSelectionChanged(selection)
+        invalidate()
+        showSelectionActionMode()
+    }
+
+    private fun showSelectionActionMode() {
+        if (selectionActionMode != null) return
+        selectionActionMode = startActionMode(
+            object : ActionMode.Callback {
+                override fun onCreateActionMode(mode: ActionMode, menu: Menu): Boolean {
+                    menu.add(Menu.NONE, MENU_COPY, 0, "Copy")
+                        .setShowAsAction(MenuItem.SHOW_AS_ACTION_ALWAYS)
+                    menu.add(Menu.NONE, MENU_PASTE, 1, "Paste")
+                        .setShowAsAction(MenuItem.SHOW_AS_ACTION_IF_ROOM)
+                    menu.add(Menu.NONE, MENU_SELECT_ALL, 2, "Select all")
+                        .setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER)
+                    return true
+                }
+
+                override fun onPrepareActionMode(mode: ActionMode, menu: Menu): Boolean {
+                    menu.findItem(MENU_COPY)?.isEnabled = selection != null
+                    menu.findItem(MENU_PASTE)?.isEnabled = clipboard.hasPrimaryClip()
+                    return true
+                }
+
+                override fun onActionItemClicked(mode: ActionMode, item: MenuItem): Boolean = when (item.itemId) {
+                    MENU_COPY -> {
+                        copySelectionToClipboard(); true
+                    }
+                    MENU_PASTE -> {
+                        pasteFromClipboard(); mode.finish(); true
+                    }
+                    MENU_SELECT_ALL -> {
+                        val snapshot = buffer.snapshot()
+                        val selected = TerminalSelection(
+                            TerminalPosition(0, 0),
+                            TerminalPosition(snapshot.screenTop + snapshot.rows - 1, snapshot.cols - 1),
+                        )
+                        selectionAnchor = selected.start
+                        selection = selected
+                        onSelectionChanged(selected)
+                        invalidate()
+                        true
+                    }
+                    else -> false
+                }
+
+                override fun onDestroyActionMode(mode: ActionMode) {
+                    selectionActionMode = null
+                    if (selection != null) {
+                        selection = null
+                        selectionAnchor = null
+                        onSelectionChanged(null)
+                        invalidate()
+                    }
+                }
+            },
+            ActionMode.TYPE_FLOATING,
+        )
     }
 
     override fun onCheckIsTextEditor(): Boolean = true
 
-    override fun onCreateInputConnection(outAttrs: android.view.inputmethod.EditorInfo): android.view.inputmethod.InputConnection {
+    override fun onCreateInputConnection(outAttrs: EditorInfo): InputConnection {
         outAttrs.inputType = android.text.InputType.TYPE_CLASS_TEXT or
-                android.text.InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD or
-                android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
-        outAttrs.imeOptions = android.view.inputmethod.EditorInfo.IME_FLAG_NO_FULLSCREEN
-        return object : android.view.inputmethod.BaseInputConnection(this, false) {
+            android.text.InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD or
+            android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+        outAttrs.imeOptions = EditorInfo.IME_FLAG_NO_FULLSCREEN
+        return object : BaseInputConnection(this, false) {
             override fun commitText(text: CharSequence?, newCursorPosition: Int): Boolean {
-                text?.let {
-                    // IMEs commonly commit Enter as a newline instead of a key event.
-                    val str = it.toString().replace('\n', '\r')
-                    if (str.isNotEmpty()) keyListener(str)
-                }
+                text?.toString()?.replace('\n', '\r')?.takeIf { it.isNotEmpty() }?.let(keyListener)
                 return super.commitText(text, newCursorPosition)
             }
+
             override fun setComposingText(text: CharSequence?, newCursorPosition: Int): Boolean {
-                // TYPE_NULL prevents composing; if reached, don't forward to avoid duplicate chars
+                // Only committed text is forwarded, which avoids duplicate IME composition text.
                 return super.setComposingText(text, newCursorPosition)
             }
+
             override fun deleteSurroundingText(beforeLength: Int, afterLength: Int): Boolean {
                 lastDeleteSurroundingTime = System.currentTimeMillis()
-                repeat(beforeLength.coerceAtMost(200)) { keyListener("\u007F") }
+                repeat(beforeLength.coerceIn(0, 200)) { keyListener("\u007F") }
+                repeat(afterLength.coerceIn(0, 200)) { keyListener("\u001B[3~") }
                 return true
             }
+
+            override fun deleteSurroundingTextInCodePoints(beforeLength: Int, afterLength: Int): Boolean {
+                lastDeleteSurroundingTime = System.currentTimeMillis()
+                repeat(beforeLength.coerceIn(0, 200)) { keyListener("\u007F") }
+                repeat(afterLength.coerceIn(0, 200)) { keyListener("\u001B[3~") }
+                return true
+            }
+
             override fun sendKeyEvent(event: KeyEvent): Boolean {
                 if (event.action != KeyEvent.ACTION_DOWN) return true
-                // DEL fallback: use if deleteSurroundingText not called recently (< 80ms)
                 if (event.keyCode == KeyEvent.KEYCODE_DEL) {
                     if (System.currentTimeMillis() - lastDeleteSurroundingTime > 80) {
                         keyListener("\u007F")
                     }
                     return true
                 }
-                // Enter
-                if (event.keyCode == KeyEvent.KEYCODE_ENTER) { keyListener("\r"); return true }
-                // Ctrl combinations often still report a printable unicodeChar
-                // (Ctrl+C reports 'c'), so let the mapper handle modifiers first.
+                if (event.keyCode == KeyEvent.KEYCODE_ENTER) {
+                    keyListener("\r")
+                    return true
+                }
                 if (event.isCtrlPressed || event.unicodeChar == 0) {
-                    val str = keyEventToString(event)
-                    if (str != null) keyListener(str)
+                    keyEventToString(event)?.let(keyListener)
                 }
                 return true
             }
+
             override fun performEditorAction(actionCode: Int): Boolean {
-                if (actionCode == android.view.inputmethod.EditorInfo.IME_ACTION_SEND ||
-                    actionCode == android.view.inputmethod.EditorInfo.IME_ACTION_DONE ||
-                    actionCode == android.view.inputmethod.EditorInfo.IME_ACTION_GO
+                if (
+                    actionCode == EditorInfo.IME_ACTION_SEND ||
+                    actionCode == EditorInfo.IME_ACTION_DONE ||
+                    actionCode == EditorInfo.IME_ACTION_GO
                 ) {
                     keyListener("\r")
                     return true
@@ -226,102 +648,157 @@ private class TerminalNativeView(
     }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
-        val str = keyEventToString(event)
-        if (str != null) {
-            keyListener(str)
+        keyEventToString(event)?.let {
+            keyListener(it)
             return true
         }
         return super.onKeyDown(keyCode, event)
     }
 
-    private val textPaint = Paint().apply {
-        isAntiAlias = true
-        typeface = Typeface.MONOSPACE
-        textSize = 32f
-        color = TermFg
-    }
-    private val bgPaint = Paint()
-    private val cursorPaint = Paint()
-
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
+        if (width <= 0 || height <= 0) return
 
-        val canvasWidth = width.toFloat()
-        val canvasHeight = height.toFloat()
-        if (canvasWidth <= 0 || canvasHeight <= 0) return
+        val snapshot = buffer.snapshot()
+        val drawColumns = snapshot.cols.coerceAtLeast(1)
+        val drawRows = snapshot.rows.coerceAtLeast(1)
+        val cellWidth = width.toFloat() / drawColumns
+        val cellHeight = height.toFloat() / drawRows
 
-        // The PTY was sized to buffer.cols.  Wrapping a logical row again at a
-        // different number of visual columns makes prompts and full-screen TUIs
-        // drift out of sync, so always draw exactly the negotiated grid width.
-        val drawCols = buffer.cols.coerceAtLeast(1)
-        val drawRows = buffer.rows.coerceAtLeast(1)
-        val cellW = canvasWidth / drawCols
-        val cellH = canvasHeight / drawRows
-        val targetTextSize = minOf(cellW * 1.6f, cellH * 0.85f, 40f).coerceAtLeast(1f)
-        textPaint.textSize = targetTextSize
-        val measuredCharW = textPaint.measureText("M")
-        if (measuredCharW > cellW && measuredCharW > 0f) {
-            textPaint.textSize *= cellW / measuredCharW
+        textPaint.textSize = baseTextSizePx * terminalFontScale
+        var measuredWidth = textPaint.measureText("M")
+        if (measuredWidth > cellWidth && measuredWidth > 0f) {
+            textPaint.textSize *= cellWidth / measuredWidth
         }
-        val fontMetrics = textPaint.fontMetrics
-        canvas.drawColor(TermBg)
-        val visibleRows = buffer.visibleRows()
-        val maxVisualRows = drawRows
+        var metrics = textPaint.fontMetrics
+        val measuredHeight = metrics.descent - metrics.ascent
+        if (measuredHeight > cellHeight && measuredHeight > 0f) {
+            textPaint.textSize *= cellHeight / measuredHeight
+            metrics = textPaint.fontMetrics
+        }
 
-        for (r in visibleRows.indices) {
-            val rowTop = r * cellH
-            if (rowTop >= canvasHeight) break
-            val row = visibleRows[r]
-            for (c in 0 until minOf(row.size, drawCols)) {
-                val cell = row[c]
-                val x = c * cellW
-                val background = if (cell.inverse) {
-                    if (cell.fg == TerminalColors.DEFAULT_FG) TermFg else TerminalColors.fg(cell.fg)
-                } else if (cell.bg != TerminalColors.DEFAULT_BG) {
-                    TerminalColors.bg(cell.bg)
-                } else {
-                    null
+        canvas.drawColor(theme.background)
+        val normalizedSelection = selection?.normalized()
+        canvas.getClipBounds(drawClipBounds)
+        val clip = drawClipBounds
+        val firstVisibleRow = floor(clip.top / cellHeight).toInt().coerceIn(0, drawRows - 1)
+        val lastVisibleRow = floor((clip.bottom - 1).coerceAtLeast(0) / cellHeight)
+            .toInt()
+            .coerceIn(firstVisibleRow, drawRows - 1)
+        val firstVisibleColumn = (floor(clip.left / cellWidth).toInt() - 1)
+            .coerceIn(0, drawColumns - 1)
+        val lastVisibleColumn = floor((clip.right - 1).coerceAtLeast(0) / cellWidth)
+            .toInt()
+            .coerceIn(firstVisibleColumn, drawColumns - 1)
+        for (visibleRow in firstVisibleRow..lastVisibleRow) {
+            val line = snapshot.lines[visibleRow]
+            val rowTop = visibleRow * cellHeight
+            if (rowTop >= height) break
+            val absoluteRow = snapshot.viewportTop + visibleRow
+            val finalColumn = minOf(line.size - 1, lastVisibleColumn)
+            for (column in firstVisibleColumn..finalColumn) {
+                val cell = line[column]
+                val left = column * cellWidth
+                val background = when {
+                    isSelected(normalizedSelection, absoluteRow, column) ||
+                        (cell.wideContinuation && isSelected(
+                            normalizedSelection,
+                            absoluteRow,
+                            column - 1,
+                        )) -> theme.selection
+                    cell.inverse -> if (cell.fg == TerminalColors.DEFAULT_FG) {
+                        theme.foreground
+                    } else {
+                        TerminalColors.fg(cell.fg)
+                    }
+                    cell.bg != TerminalColors.DEFAULT_BG -> TerminalColors.bg(cell.bg)
+                    else -> null
                 }
                 if (background != null) {
-                    bgPaint.color = background
-                    canvas.drawRect(x, rowTop, x + cellW, rowTop + cellH, bgPaint)
+                    backgroundPaint.color = background
+                    canvas.drawRect(left, rowTop, left + cellWidth, rowTop + cellHeight, backgroundPaint)
                 }
 
-                if (cell.char == ' ') continue
-
+                if (cell.char == ' ' || cell.wideContinuation) continue
                 textPaint.color = if (cell.inverse) {
-                    if (cell.bg == TerminalColors.DEFAULT_BG) TermBg else TerminalColors.bg(cell.bg)
+                    if (cell.bg == TerminalColors.DEFAULT_BG) theme.background else TerminalColors.bg(cell.bg)
                 } else if (cell.fg == TerminalColors.DEFAULT_FG) {
-                    TermFg
+                    theme.foreground
                 } else {
                     TerminalColors.fg(cell.fg)
                 }
                 textPaint.isFakeBoldText = cell.bold
                 textPaint.isUnderlineText = cell.underline
-
-                val baseline = rowTop + (cellH - fontMetrics.descent - fontMetrics.ascent) / 2f
-                canvas.drawText(cell.char.toString(), x, baseline, textPaint)
+                val baseline = rowTop + (cellHeight - metrics.descent - metrics.ascent) / 2f
+                // Avoid allocating a one-character String for every painted cell.
+                drawCharacter[0] = cell.char
+                canvas.drawText(drawCharacter, 0, 1, left, baseline, textPaint)
             }
         }
 
-        val curCol = buffer.cursorCol
-        val curRow = buffer.cursorRow - buffer.scrollTop
-        val times = System.currentTimeMillis() % 1060
-        if (times < 530 && buffer.cursorVisible) {
-            val cursorVisRow = curRow + (curCol / drawCols)
-            val cursorVisCol = (curCol % drawCols).coerceIn(0, drawCols - 1)
-            if (cursorVisRow in 0 until maxVisualRows && cursorVisRow * cellH < canvasHeight) {
-                cursorPaint.color = android.graphics.Color.argb(100, 0, 0, 0)
-                canvas.drawRect(cursorVisCol * cellW, cursorVisRow * cellH,
-                    (cursorVisCol + 1) * cellW, (cursorVisRow + 1) * cellH, cursorPaint)
-            }
+        val visibleCursorRow = snapshot.cursorRow - snapshot.viewportTop
+        if (
+            cursorPhaseVisible && snapshot.cursorVisible &&
+            visibleCursorRow in 0 until drawRows
+        ) {
+            val visibleCursorColumn = snapshot.cursorCol.coerceIn(0, drawColumns - 1)
+            cursorPaint.color = theme.cursor
+            canvas.drawRect(
+                visibleCursorColumn * cellWidth,
+                visibleCursorRow * cellHeight,
+                (visibleCursorColumn + 1) * cellWidth,
+                (visibleCursorRow + 1) * cellHeight,
+                cursorPaint,
+            )
         }
+    }
+
+    private fun restartCursorBlink() {
+        mainHandler.removeCallbacks(cursorBlinkRunnable)
+        cursorPhaseVisible = true
+        if (isAttachedToWindow && isCursorVisibleInViewport(buffer.snapshot())) {
+            mainHandler.postDelayed(cursorBlinkRunnable, CURSOR_BLINK_MS)
+        }
+    }
+
+    private fun isCursorVisibleInViewport(snapshot: TerminalSnapshot): Boolean =
+        snapshot.cursorVisible && snapshot.cursorRow - snapshot.viewportTop in 0 until snapshot.rows
+
+    private fun invalidateCursor(snapshot: TerminalSnapshot) {
+        if (width <= 0 || height <= 0 || !isCursorVisibleInViewport(snapshot)) return
+        val cellWidth = width.toFloat() / snapshot.cols.coerceAtLeast(1)
+        val cellHeight = height.toFloat() / snapshot.rows.coerceAtLeast(1)
+        val column = snapshot.cursorCol.coerceIn(0, snapshot.cols - 1)
+        val row = snapshot.cursorRow - snapshot.viewportTop
+        postInvalidateOnAnimation(
+            floor(column * cellWidth).toInt(),
+            floor(row * cellHeight).toInt(),
+            ceil((column + 1) * cellWidth).toInt() + 1,
+            ceil((row + 1) * cellHeight).toInt() + 1,
+        )
+    }
+
+    private fun isSelected(selection: TerminalSelection?, row: Int, col: Int): Boolean {
+        selection ?: return false
+        if (row !in selection.start.row..selection.end.row) return false
+        val firstColumn = if (row == selection.start.row) selection.start.col else 0
+        val lastColumn = if (row == selection.end.row) selection.end.col else Int.MAX_VALUE
+        return col in firstColumn..lastColumn
+    }
+
+    private companion object {
+        const val CURSOR_BLINK_MS = 530L
+        const val LINE_SPACING = 1.12f
+        const val SCROLL_SENSITIVITY = 0.4f
+        const val MIN_FONT_SCALE = 0.65f
+        const val MAX_FONT_SCALE = 2.25f
+        const val MENU_COPY = 1
+        const val MENU_PASTE = 2
+        const val MENU_SELECT_ALL = 3
     }
 }
 
 private fun keyEventToString(event: KeyEvent): String? {
-    // Check Ctrl before unicodeChar: Android still reports the printable
-    // character for Ctrl+C/D/Z on many hardware keyboards.
     if (event.isCtrlPressed) {
         return when (event.keyCode) {
             KeyEvent.KEYCODE_A -> "\u0001"
@@ -354,8 +831,8 @@ private fun keyEventToString(event: KeyEvent): String? {
             else -> null
         }
     }
-    val ch = event.unicodeChar
-    if (ch != 0) return ch.toChar().toString()
+    val character = event.unicodeChar
+    if (character != 0) return character.toChar().toString()
     return when (event.keyCode) {
         KeyEvent.KEYCODE_ENTER -> "\r"
         KeyEvent.KEYCODE_DEL -> "\u007F"

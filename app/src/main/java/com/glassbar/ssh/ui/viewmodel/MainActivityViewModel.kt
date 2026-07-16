@@ -18,7 +18,6 @@ class MainActivityViewModel(
     private val prefs = glassBarApp.getSharedPreferences("settings", Context.MODE_PRIVATE)
     private val mainPageState = MainPageState(savedStateHandle)
 
-    var pendingSshConnection: com.glassbar.ssh.ui.screen.ssh.SshConnectionInfo? = null
     private val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
         if (key == null || key in observedKeys) {
             _uiState.value = readUiState()
@@ -43,16 +42,11 @@ class MainActivityViewModel(
     }
 
     private fun readUiState(): MainActivityUiState {
-        // Read pageScale from prefs, default to 1.0f
         val pageScale = prefs.getFloat("page_scale", 1.0f)
-        // Read ui_mode from prefs, default to Miuix
         val uiModeValue = prefs.getString("ui_mode", UiMode.DEFAULT_VALUE) ?: UiMode.DEFAULT_VALUE
         return MainActivityUiState(
             appSettings = ThemeController.getAppSettings(glassBarApp),
             pageScale = pageScale,
-            enableBlur = true,
-            enableFloatingBottomBar = true,
-            enableFloatingBottomBarBlur = true,
             uiMode = UiMode.fromValue(uiModeValue),
         )
     }

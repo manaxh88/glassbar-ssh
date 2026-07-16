@@ -5,7 +5,6 @@ import java.util.Properties
 plugins {
     alias(libs.plugins.agp.app)
     alias(libs.plugins.compose.compiler)
-    alias(libs.plugins.kotlin.serialization)
     id("kotlin-parcelize")
 }
 
@@ -24,14 +23,40 @@ val signingProperties = Properties().apply {
         signingPropertiesFile.inputStream().use { load(it) }
     }
 }
+val requiredSigningProperties = listOf(
+    "KEYSTORE_FILE",
+    "KEYSTORE_PASSWORD",
+    "KEY_ALIAS",
+    "KEY_PASSWORD",
+)
+val releaseKeystoreFile = signingProperties.getProperty("KEYSTORE_FILE")
+    ?.takeIf(String::isNotBlank)
+    ?.let(rootProject::file)
+val hasCompleteReleaseSigning = signingPropertiesFile.exists() &&
+    requiredSigningProperties.all { !signingProperties.getProperty(it).isNullOrBlank() } &&
+    releaseKeystoreFile?.isFile == true
+val releaseArtifactRequested = gradle.startParameter.taskNames.any { requestedTask ->
+    val taskName = requestedTask.substringAfterLast(':').lowercase()
+    taskName in setOf("assemble", "build", "bundle", "install", "package", "publish") ||
+        (taskName.contains("release") &&
+            listOf("assemble", "bundle", "install", "package", "publish", "sign")
+                .any(taskName::startsWith))
+}
+
+if (releaseArtifactRequested && !hasCompleteReleaseSigning) {
+    throw GradleException(
+        "A signed release was requested, but sign.properties is missing or incomplete. " +
+            "Required keys: ${requiredSigningProperties.joinToString()}"
+    )
+}
 
 android {
     namespace = "com.glassbar.ssh"
 
     signingConfigs {
-        if (signingPropertiesFile.exists()) {
+        if (hasCompleteReleaseSigning) {
             create("release") {
-                storeFile = rootProject.file(signingProperties.getProperty("KEYSTORE_FILE"))
+                storeFile = releaseKeystoreFile
                 storePassword = signingProperties.getProperty("KEYSTORE_PASSWORD")
                 keyAlias = signingProperties.getProperty("KEY_ALIAS")
                 keyPassword = signingProperties.getProperty("KEY_PASSWORD")
@@ -55,16 +80,6 @@ android {
     buildFeatures {
         buildConfig = true
         compose = true
-    }
-
-    packaging {
-        dex {
-            useLegacyPackaging = true
-        }
-        jniLibs {
-            useLegacyPackaging = true
-            excludes += "lib/*/libandroidx.graphics.path.so"
-        }
     }
 
     dependenciesInfo {
@@ -92,18 +107,12 @@ android {
 
     lint {
         abortOnError = true
-        checkReleaseBuilds = false
+        checkReleaseBuilds = true
     }
 
     compileOptions {
         sourceCompatibility = androidSourceCompatibility
         targetCompatibility = androidTargetCompatibility
-    }
-}
-
-androidComponents {
-    onVariants(selector().withBuildType("release")) {
-        it.packaging.resources.excludes.addAll(listOf("META-INF/**", "kotlin/**", "**.bin"))
     }
 }
 
@@ -114,6 +123,8 @@ base {
 }
 
 dependencies {
+    testImplementation(libs.junit4)
+
     implementation(libs.androidx.activity.compose)
 
     implementation(platform(libs.androidx.compose.bom))
@@ -131,29 +142,16 @@ dependencies {
     implementation(libs.androidx.lifecycle.viewmodel.navigation3)
 
     implementation(libs.androidx.navigation3.runtime)
+    implementation(libs.androidx.navigation3.ui)
     implementation(libs.androidx.navigationevent.compose)
 
     implementation(libs.kotlinx.coroutines.core)
 
-    implementation(libs.androidx.webkit)
-
-    implementation(libs.commonmark)
-    implementation(libs.commonmark.ext.gfm.tables)
-    implementation(libs.commonmark.ext.gfm.strikethrough)
-    implementation(libs.commonmark.ext.autolink)
-    implementation(libs.commonmark.ext.task.list.items)
-
     implementation(libs.miuix.ui)
     implementation(libs.miuix.icons)
-    implementation(libs.miuix.navigation3.ui)
-    implementation(libs.miuix.preference)
     implementation(libs.miuix.blur)
-
-    implementation(platform(libs.okhttp.bom))
-    implementation(libs.okhttp)
 
     implementation(libs.material.kolor)
 
-    implementation(libs.appiconloader)
     implementation(libs.jsch)
 }
