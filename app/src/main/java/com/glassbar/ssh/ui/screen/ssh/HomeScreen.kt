@@ -38,6 +38,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -54,6 +55,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -68,6 +71,8 @@ import com.glassbar.ssh.ui.navigation3.Route
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.Text
@@ -101,6 +106,9 @@ fun HomeScreen(
     var editingConnection by remember { mutableStateOf<SshConnectionInfo?>(null) }
     var deleteTarget by remember { mutableStateOf<SshConnectionInfo?>(null) }
     var showResetCorruptDialog by remember { mutableStateOf(false) }
+    // Single formatter shared across all connection cards — SimpleDateFormat is not
+    // thread-safe but LazyColumn composes items sequentially on the main thread.
+    val timeFormatter = remember { SimpleDateFormat("HH:mm:ss", Locale.getDefault()) }
 
     val isHomeVisible =
         lifecycleState.isAtLeast(Lifecycle.State.RESUMED) &&
@@ -300,9 +308,7 @@ fun HomeScreen(
             ) {
                 items(connections, key = { it.id }) { conn ->
                     Card(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { onConnect(conn) },
+                        modifier = Modifier.fillMaxWidth(),
                     ) {
                         Row(
                             modifier = Modifier
@@ -311,7 +317,11 @@ fun HomeScreen(
                                 .padding(12.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            Column(modifier = Modifier.weight(1f)) {
+                            Column(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clickable { onConnect(conn) },
+                            ) {
                                 Text(
                                     text = conn.name.ifBlank { "${conn.username}@${conn.host}" },
                                     color = textColor,
@@ -337,8 +347,7 @@ fun HomeScreen(
                             val isRefreshing = conn.id in refreshingIds
                             val updatedTime = stats?.let {
                                 remember(it.updatedAtMillis) {
-                                    SimpleDateFormat("HH:mm:ss", Locale.getDefault())
-                                        .format(Date(it.updatedAtMillis))
+                                    timeFormatter.format(Date(it.updatedAtMillis))
                                 }
                             }
                             Column(
@@ -477,27 +486,11 @@ fun HomeScreen(
     // Delete confirmation dialog
     if (deleteTarget != null) {
         val conn = deleteTarget!!
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(Color.Black.copy(alpha = 0.4f))
-                .clickable(
-                    interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
-                    indication = null,
-                    onClick = { deleteTarget = null }
-                ),
-            contentAlignment = Alignment.Center,
-        ) {
+        Dialog(onDismissRequest = { deleteTarget = null }) {
             Column(
                 modifier = Modifier
-                    .padding(horizontal = 48.dp)
                     .clip(RoundedCornerShape(16.dp))
                     .background(MiuixTheme.colorScheme.surfaceContainer)
-                    .clickable(
-                        interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
-                        indication = null,
-                        onClick = {}
-                    )
                     .padding(24.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
@@ -556,97 +549,72 @@ fun HomeScreen(
         }
     }
 
-        if (showResetCorruptDialog && storageLoadError != null) {
-            Box(
+    if (showResetCorruptDialog && storageLoadError != null) {
+        Dialog(onDismissRequest = { showResetCorruptDialog = false }) {
+            Column(
                 modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.4f))
-                    .clickable(
-                        interactionSource = remember {
-                            androidx.compose.foundation.interaction.MutableInteractionSource()
-                        },
-                        indication = null,
-                        onClick = { showResetCorruptDialog = false },
-                    ),
-                contentAlignment = Alignment.Center,
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(MiuixTheme.colorScheme.surfaceContainer)
+                    .padding(24.dp),
             ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 32.dp)
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(MiuixTheme.colorScheme.surfaceContainer)
-                        .clickable(
-                            interactionSource = remember {
-                                androidx.compose.foundation.interaction.MutableInteractionSource()
-                            },
-                            indication = null,
-                            onClick = {},
-                        )
-                        .padding(24.dp),
-                ) {
-                    Text(
-                        text = stringResource(R.string.reset_connection_storage_confirm_title),
-                        color = textColor,
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold,
-                    )
+                Text(
+                    text = stringResource(R.string.reset_connection_storage_confirm_title),
+                    color = textColor,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold,
+                )
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text = stringResource(
+                        if (storageLoadError?.backupAvailable == true) {
+                            R.string.reset_connection_storage_confirm_message
+                        } else {
+                            R.string.reset_connection_storage_confirm_message_no_backup
+                        },
+                    ),
+                    color = secondaryTextColor,
+                    fontSize = 13.sp,
+                )
+                storageOperationError?.let { message ->
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        text = stringResource(
-                            if (storageLoadError?.backupAvailable == true) {
-                                R.string.reset_connection_storage_confirm_message
-                            } else {
-                                R.string.reset_connection_storage_confirm_message_no_backup
-                            },
-                        ),
-                        color = secondaryTextColor,
-                        fontSize = 13.sp,
+                        text = message,
+                        color = MiuixTheme.colorScheme.error,
+                        fontSize = 12.sp,
                     )
-                    storageOperationError?.let { message ->
-                        Spacer(Modifier.height(8.dp))
+                }
+                Spacer(Modifier.height(20.dp))
+                Row(modifier = Modifier.fillMaxWidth()) {
+                    BlueButton(
+                        onClick = { showResetCorruptDialog = false },
+                        modifier = Modifier.height(40.dp).weight(1f),
+                    ) {
                         Text(
-                            text = message,
-                            color = MiuixTheme.colorScheme.error,
-                            fontSize = 12.sp,
+                            text = stringResource(R.string.action_cancel),
+                            color = Color.White,
+                            fontSize = 13.sp,
                         )
                     }
-                    Spacer(Modifier.height(20.dp))
-                    Row(modifier = Modifier.fillMaxWidth()) {
-                        BlueButton(
-                            onClick = { showResetCorruptDialog = false },
-                            modifier = Modifier
-                                .height(40.dp)
-                                .weight(1f),
-                        ) {
-                            Text(
-                                text = stringResource(R.string.action_cancel),
-                                color = Color.White,
-                                fontSize = 13.sp,
-                            )
-                        }
-                        Spacer(Modifier.width(12.dp))
-                        BlueButton(
-                            onClick = {
-                                if (homeViewModel.resetCorruptConnections()) {
-                                    showResetCorruptDialog = false
-                                }
-                            },
-                            modifier = Modifier
-                                .height(40.dp)
-                                .weight(1f),
-                        ) {
-                            Text(
-                                text = stringResource(R.string.reset_connection_storage),
-                                color = Color.White,
-                                fontSize = 13.sp,
-                            )
-                        }
+                    Spacer(Modifier.width(12.dp))
+                    BlueButton(
+                        onClick = {
+                            if (homeViewModel.resetCorruptConnections()) {
+                                showResetCorruptDialog = false
+                            }
+                        },
+                        modifier = Modifier.height(40.dp).weight(1f),
+                    ) {
+                        Text(
+                            text = stringResource(R.string.reset_connection_storage),
+                            color = Color.White,
+                            fontSize = 13.sp,
+                        )
                     }
                 }
             }
         }
     }
+}
 }
 
 @Composable
@@ -670,8 +638,10 @@ private fun AddEditDialog(
     val parsedPort = port.toIntOrNull()?.takeIf { it in 1..65535 }
     val textColor = MiuixTheme.colorScheme.onSurface
     val secondaryTextColor = MiuixTheme.colorScheme.onSurfaceVariantSummary
-    val privateKeyName = remember(context, privateKeyUri) {
-        privateKeyDisplayName(context, privateKeyUri)
+    val privateKeyName by produceState(initialValue = "", key1 = privateKeyUri) {
+        value = withContext(Dispatchers.IO) {
+            privateKeyDisplayName(context, privateKeyUri)
+        }
     }
     val privateKeyPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument(),
@@ -685,17 +655,9 @@ private fun AddEditDialog(
         }
     }
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .imePadding()
-            .background(Color.Black.copy(alpha = 0.4f))
-            .clickable(
-                interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
-                indication = null,
-                onClick = onDismiss
-            ),
-        contentAlignment = Alignment.Center,
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
     ) {
         Column(
             modifier = Modifier
@@ -703,11 +665,7 @@ private fun AddEditDialog(
                 .padding(horizontal = 24.dp)
                 .clip(RoundedCornerShape(16.dp))
                 .background(MiuixTheme.colorScheme.surfaceContainer)
-                .clickable(
-                    interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
-                    indication = null,
-                    onClick = {}
-                )
+                .imePadding()
                 .verticalScroll(rememberScrollState())
                 .padding(20.dp),
         ) {
@@ -906,6 +864,4 @@ private fun AddEditDialog(
             }
         }
     }
-
-
 }

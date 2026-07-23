@@ -97,9 +97,21 @@ class TerminalOutputBuffer(
         }
     }
 
-    /** Drops queued output and permanently releases the worker thread. */
-    fun clear() = close()
+    /** Clears queued output and cancels any pending flush without shutting down the worker. */
+    fun reset() {
+        synchronized(lock) {
+            if (closed) return
+            scheduledTask?.cancel(false)
+            scheduledTask = null
+            chunks.clear()
+            pendingChars = 0L
+        }
+    }
 
+    /** Drops queued output and cancels pending flush tasks. Equivalent to [reset]. */
+    fun clear() = reset()
+
+    /** Drops queued output and permanently releases the worker thread. */
     override fun close() {
         synchronized(lock) {
             if (closed) return

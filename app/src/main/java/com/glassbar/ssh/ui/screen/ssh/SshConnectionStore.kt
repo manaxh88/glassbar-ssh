@@ -12,10 +12,12 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.nio.charset.StandardCharsets
 import java.security.KeyStore
+import java.util.concurrent.locks.ReentrantLock
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
+import kotlin.concurrent.withLock
 
 data class SshConnectionInfo(
     val id: String = kotlin.random.Random.nextLong().toString(36),
@@ -111,18 +113,34 @@ object SshConnectionStore {
     private const val ENCRYPTED_PASSWORD = "password_encrypted"
     private const val UNKNOWN_CORRUPTION_DETAIL = "Unable to decode stored SSH connections"
 
+    /**
+     * Explicit re-entrant lock.
+     *
+     * Re-entrancy is required because [getAll] calls [save] internally when it migrates
+     * legacy plaintext passwords to encrypted storage.  Using a plain [ReentrantLock] makes
+     * this intentional nesting visible, whereas the implicit [kotlin.synchronized] on an
+     * `object` hid it behind a less-obvious annotation.
+     *
+     * All public and private mutating helpers must be called while holding this lock or
+     * from within a [lock] block at the call site.
+     */
+    private val lock = ReentrantLock()
+    private var cachedConnections: List<SshConnectionInfo>? = null
+    private val encryptionCache = mutableMapOf<String, Pair<String, String>>()
+
     private val _loadError = MutableStateFlow<SshConnectionLoadError?>(null)
     val loadError: StateFlow<SshConnectionLoadError?> = _loadError.asStateFlow()
 
-    @Synchronized
-    fun getAll(context: Context): List<SshConnectionInfo> {
+    fun getAll(context: Context): List<SshConnectionInfo> = lock.withLock {
+        cachedConnections?.let { return it }
+
         val prefs = preferences(context)
         if (prefs.getBoolean(KEY_CORRUPTION_BLOCKED, false)) {
             publishPersistedLoadError(prefs)
             return emptyList()
         }
 
-        return when (
+        val loaded = when (
             val result = decodeConnectionData(prefs.getString(KEY_CONNECTIONS, null)) {
                 decodeConnections(it)
             }
@@ -148,25 +166,27 @@ object SshConnectionStore {
                 decoded.connections
             }
         }
+        cachedConnections = loaded
+        return loaded
     }
 
-    @Synchronized
-    fun save(context: Context, connections: List<SshConnectionInfo>) {
+    fun save(context: Context, connections: List<SshConnectionInfo>) = lock.withLock {
         val prefs = preferences(context)
         requireWritable(prefs)
         persistConnections(prefs, encodeConnections(prefs, connections))
+        val activeIds = connections.map { it.id }.toSet()
+        encryptionCache.keys.retainAll(activeIds)
+        cachedConnections = connections
     }
 
-    @Synchronized
-    fun add(context: Context, info: SshConnectionInfo) {
+    fun add(context: Context, info: SshConnectionInfo) = lock.withLock {
         val list = getAll(context).toMutableList()
         requireWritable(preferences(context))
         list.add(0, info)
         save(context, list)
     }
 
-    @Synchronized
-    fun update(context: Context, info: SshConnectionInfo) {
+    fun update(context: Context, info: SshConnectionInfo) = lock.withLock {
         val list = getAll(context).toMutableList()
         requireWritable(preferences(context))
         val idx = list.indexOfFirst { it.id == info.id }
@@ -176,8 +196,7 @@ object SshConnectionStore {
         }
     }
 
-    @Synchronized
-    fun delete(context: Context, id: String) {
+    fun delete(context: Context, id: String) = lock.withLock {
         val list = getAll(context).toMutableList()
         requireWritable(preferences(context))
         list.removeAll { it.id == id }
@@ -193,11 +212,10 @@ object SshConnectionStore {
      * chosen to discard the corrupt value. The backup is retained for export
      * or diagnostics until a later corruption replaces it.
      */
-    @Synchronized
     fun replaceCorruptData(
         context: Context,
         recoveredConnections: List<SshConnectionInfo>,
-    ) {
+    ) = lock.withLock {
         val prefs = preferences(context)
         check(isWriteBlocked(prefs)) { "SSH connection storage is not corrupt" }
         val encoded = encodeConnections(prefs, recoveredConnections)
@@ -210,6 +228,7 @@ object SshConnectionStore {
                 .commit(),
         ) { "Failed to recover SSH connections" }
         _loadError.value = null
+        cachedConnections = recoveredConnections
     }
 
     private fun decodeConnections(raw: String): DecodedConnections {
@@ -227,7 +246,13 @@ object SshConnectionStore {
 
             val password = when {
                 !shouldSave -> ""
-                encrypted != null -> SshCredentialCrypto.decrypt(id, encrypted).orEmpty()
+                encrypted != null -> {
+                    val decrypted = SshCredentialCrypto.decrypt(id, encrypted).orEmpty()
+                    if (decrypted.isNotEmpty()) {
+                        encryptionCache[id] = decrypted to encrypted
+                    }
+                    decrypted
+                }
                 legacy != null -> {
                     containsLegacyPlaintext = true
                     legacy
@@ -250,7 +275,16 @@ object SshConnectionStore {
             connections.forEach { info ->
                 val encryptedPassword = when {
                     !info.savePassword -> null
-                    info.password.isNotEmpty() -> SshCredentialCrypto.encrypt(info.id, info.password)
+                    info.password.isNotEmpty() -> {
+                        val cached = encryptionCache[info.id]
+                        if (cached != null && cached.first == info.password) {
+                            cached.second
+                        } else {
+                            val encrypted = SshCredentialCrypto.encrypt(info.id, info.password)
+                            encryptionCache[info.id] = info.password to encrypted
+                            encrypted
+                        }
+                    }
                     else -> existingCredentials[info.id]
                 }
                 put(info.toJson(encryptedPassword))

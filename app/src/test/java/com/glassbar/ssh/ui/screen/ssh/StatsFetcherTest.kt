@@ -40,28 +40,28 @@ class StatsFetcherTest {
 
     @Test
     fun `parse rejects missing CPU value`() {
-        val error = assertThrows(IOException::class.java) {
+        val error = assertThrows(StatsParseException::class.java) {
             StatsFetcher.parse("MEM=20.0", updatedAt = 1L)
         }
 
-        assertEquals("服务器未返回 CPU 数据", error.message)
+        assertEquals("Stats output missing field: CPU", error.message)
     }
 
     @Test
     fun `parse rejects malformed memory value`() {
-        val error = assertThrows(IOException::class.java) {
+        val error = assertThrows(StatsParseException::class.java) {
             StatsFetcher.parse("CPU=20.0\nMEM=unavailable", updatedAt = 1L)
         }
 
-        assertEquals("服务器未返回内存数据", error.message)
+        assertEquals("Stats output missing field: MEM", error.message)
     }
 
     @Test
     fun `parse rejects non-finite percentages`() {
-        assertThrows(IOException::class.java) {
+        assertThrows(StatsParseException::class.java) {
             StatsFetcher.parse("CPU=NaN\nMEM=20.0", updatedAt = 1L)
         }
-        assertThrows(IOException::class.java) {
+        assertThrows(StatsParseException::class.java) {
             StatsFetcher.parse("CPU=20.0\nMEM=Infinity", updatedAt = 1L)
         }
     }

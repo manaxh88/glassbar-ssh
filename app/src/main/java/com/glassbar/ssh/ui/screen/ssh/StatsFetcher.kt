@@ -21,6 +21,23 @@ data class ServerStats(
     val updatedAtMillis: Long = System.currentTimeMillis(),
 )
 
+/** Base class for all recoverable Stats-fetch failures. */
+sealed class StatsFetchException(message: String) : IOException(message)
+
+/** The fetch did not complete within the configured timeout. */
+class StatsFetchTimeoutException : StatsFetchException("Stats fetch timed out")
+
+/** The remote command produced more output than the configured cap. */
+class StatsOutputTooLargeException : StatsFetchException("Stats command output exceeded size limit")
+
+/** The remote command exited with a non-zero status code. */
+class StatsCommandFailedException(exitCode: Int, stderr: String) : StatsFetchException(
+    "Stats command exited with code $exitCode" + if (stderr.isNotBlank()) ": $stderr" else "",
+)
+
+/** The command output is missing an expected field. */
+class StatsParseException(field: String) : StatsFetchException("Stats output missing field: $field")
+
 /**
  * Applies the application's known-host policy before a statistics session connects.
  *
@@ -58,6 +75,15 @@ object StatsFetcher {
         awk '/^MemTotal:/ { total=${'$'}2 } /^MemAvailable:/ { available=${'$'}2 } /^MemFree:/ { free=${'$'}2 } /^Buffers:/ { buffers=${'$'}2 } /^Cached:/ { cached=${'$'}2 } END { if (!available) available=free+buffers+cached; printf "MEM=%.2f\n", total > 0 ? (total-available) * 100 / total : 0 }' /proc/meminfo
     """.trimIndent()
 
+    /**
+     * Fetches CPU and memory statistics for the given host.
+     *
+     * Returns [ServerStats] on success.  On failure throws a [StatsFetchException] subtype or
+     * any underlying [IOException] / SSH exception.  [CancellationException] is always
+     * re-thrown so coroutine cancellation propagates correctly.
+     *
+     * Callers are responsible for catching exceptions and mapping them to user-visible strings.
+     */
     suspend fun fetch(
         host: String,
         port: Int,
@@ -65,22 +91,10 @@ object StatsFetcher {
         password: String,
         configureSession: StatsSessionConfigurator = { _, _ -> },
     ): ServerStats = withContext(Dispatchers.IO) {
-        try {
-            val output = withTimeoutOrNull(FETCH_TIMEOUT_MS) {
-                fetchOutput(host, port, username, password, configureSession)
-            } ?: return@withContext ServerStats(
-                error = "获取服务器状态超时",
-                updatedAtMillis = System.currentTimeMillis(),
-            )
-            parse(output, System.currentTimeMillis())
-        } catch (error: CancellationException) {
-            throw error
-        } catch (error: Exception) {
-            ServerStats(
-                error = error.message?.takeIf(String::isNotBlank) ?: "无法获取服务器状态",
-                updatedAtMillis = System.currentTimeMillis(),
-            )
-        }
+        val output = withTimeoutOrNull(FETCH_TIMEOUT_MS) {
+            fetchOutput(host, port, username, password, configureSession)
+        } ?: throw StatsFetchTimeoutException()
+        parse(output, System.currentTimeMillis())
     }
 
     private suspend fun fetchOutput(
@@ -130,11 +144,11 @@ object StatsFetcher {
             }
 
             if (standardOutput.limitExceeded || errorOutput.limitExceeded) {
-                throw IOException("服务器状态命令输出过大")
+                throw StatsOutputTooLargeException()
             }
             val stderr = errorOutput.toString(Charsets.UTF_8.name()).trim()
             if (channel.exitStatus != 0) {
-                throw IOException(stderr.ifBlank { "服务器状态命令执行失败（${channel.exitStatus}）" })
+                throw StatsCommandFailedException(channel.exitStatus, stderr)
             }
             return standardOutput.toString(Charsets.UTF_8.name())
         } finally {
@@ -153,9 +167,9 @@ object StatsFetcher {
             .toMap()
 
         val cpu = values["CPU"]?.toFloatOrNull()?.takeIf { it.isFinite() }
-            ?: throw IOException("服务器未返回 CPU 数据")
+            ?: throw StatsParseException("CPU")
         val memory = values["MEM"]?.toFloatOrNull()?.takeIf { it.isFinite() }
-            ?: throw IOException("服务器未返回内存数据")
+            ?: throw StatsParseException("MEM")
 
         return ServerStats(
             cpuPercent = cpu.coerceIn(0f, 100f),

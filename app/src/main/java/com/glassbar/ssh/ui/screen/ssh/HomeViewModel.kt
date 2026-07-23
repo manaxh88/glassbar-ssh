@@ -12,6 +12,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.supervisorScope
@@ -37,12 +38,12 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     private val _storageOperationError = MutableStateFlow<String?>(null)
     val storageOperationError: StateFlow<String?> = _storageOperationError.asStateFlow()
 
-    private val refreshMutex = Mutex()
     private val refreshSemaphore = Semaphore(MAX_CONCURRENT_REQUESTS)
     private var failureCounts = emptyMap<String, Int>()
     private var nextAutoRefreshAt = emptyMap<String, Long>()
     private var pollingJob: Job? = null
     private var manualRefreshJob: Job? = null
+    @Volatile
     private var isScreenActive = false
 
     fun setActive(active: Boolean) {
@@ -81,7 +82,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
         manualRefreshJob = viewModelScope.launch {
-            refresh(listOf(connection), waitForCurrentRefresh = true)
+            refresh(listOf(connection))
         }
     }
 
@@ -141,24 +142,27 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
     private suspend fun refresh(
         targets: List<SshConnectionInfo>,
-        waitForCurrentRefresh: Boolean = false,
     ) {
         val requestedTargets = targets.distinctBy(SshConnectionInfo::id)
         if (requestedTargets.isEmpty()) return
-        if (waitForCurrentRefresh) {
-            refreshMutex.lock()
-        } else if (!refreshMutex.tryLock()) {
-            return
+
+        val currentConnectionsAtStart = _connections.value.associateBy(SshConnectionInfo::id)
+        var refreshTargets = emptyList<SshConnectionInfo>()
+        
+        _refreshingIds.update { currentRefreshing ->
+            refreshTargets = requestedTargets.filter { target ->
+                currentConnectionsAtStart[target.id] == target && target.id !in currentRefreshing
+            }
+            if (refreshTargets.isEmpty() || storageLoadError.value != null) {
+                currentRefreshing
+            } else {
+                currentRefreshing + refreshTargets.map { it.id }
+            }
         }
 
-        try {
-            val currentConnectionsAtStart = _connections.value.associateBy(SshConnectionInfo::id)
-            val refreshTargets = requestedTargets.filter { target ->
-                currentConnectionsAtStart[target.id] == target
-            }
-            if (refreshTargets.isEmpty() || storageLoadError.value != null) return
+        if (refreshTargets.isEmpty() || storageLoadError.value != null) return
 
-            _refreshingIds.value = refreshTargets.mapTo(mutableSetOf(), SshConnectionInfo::id)
+        try {
             val results = supervisorScope {
                 refreshTargets.map { connection ->
                     async {
@@ -193,8 +197,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             failureCounts = updatedFailures
             nextAutoRefreshAt = updatedNextRefresh
         } finally {
-            _refreshingIds.value = emptySet()
-            refreshMutex.unlock()
+            _refreshingIds.update { it - refreshTargets.mapTo(mutableSetOf(), SshConnectionInfo::id) }
         }
     }
 
@@ -202,18 +205,13 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         var privateKey: ByteArray? = null
         return try {
             privateKey = readPrivateKey(context, connection.privateKeyUri)
-            val stats = StatsFetcher.fetch(
+            StatsFetcher.fetch(
                 host = connection.host,
                 port = connection.port,
                 username = connection.username,
                 password = connection.password,
                 configureSession = statsSessionConfigurator(context, connection, privateKey),
             )
-            if (stats.error == null) {
-                stats
-            } else {
-                stats.copy(error = context.getString(R.string.server_stats_unavailable))
-            }
         } catch (error: CancellationException) {
             throw error
         } catch (_: Exception) {

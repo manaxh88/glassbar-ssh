@@ -143,6 +143,7 @@ class TerminalBuffer(
     private var ringRows = Array(capacity) { newBlankRow(cols) }
 
     /** Compatibility view of all logical rows. Prefer [snapshot] for rendering. */
+    @Deprecated("Use snapshot() for rendering and state inspection", replaceWith = ReplaceWith("snapshot()"))
     val cells: Array<Array<TerminalCell>>
         get() = synchronized(lock) {
             Array(capacity) { logicalRow(it).copyOf() }
@@ -950,10 +951,11 @@ class TerminalBuffer(
         }
     }
 
-    private fun blankCell() = TerminalCell(bg = currentBg)
+    private fun blankCell(): TerminalCell =
+        if (currentBg == TerminalColors.DEFAULT_BG) DEFAULT_CELL else TerminalCell(bg = currentBg)
 
     private fun newBlankRow(width: Int): Array<TerminalCell> {
-        val blank = TerminalCell(bg = currentBg)
+        val blank = blankCell()
         return Array(width) { blank }
     }
 
@@ -988,6 +990,7 @@ class TerminalBuffer(
     private enum class EscapeState { NORMAL, ESCAPE, CSI, CSI_IGNORE, OSC, OSC_ESCAPE }
 
     private companion object {
+        val DEFAULT_CELL = TerminalCell()
         const val MAX_CSI_PARAMS = 32
         const val MAX_CSI_PARAM_DIGITS = 9
         const val MAX_OSC_LENGTH = 4096

@@ -7,8 +7,9 @@ import com.jcraft.jsch.Session
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
+import kotlinx.coroutines.cancelChildren
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -21,6 +22,8 @@ import java.io.InputStream
 import java.io.InputStreamReader
 import java.io.OutputStream
 import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.locks.ReentrantLock
+import kotlin.concurrent.withLock as jvmWithLock
 
 enum class SshConnectionState {
     DISCONNECTED,
@@ -29,6 +32,13 @@ enum class SshConnectionState {
     ERROR,
 }
 
+/**
+ * Configuration payload for an SSH connection.
+ *
+ * Note: Array fields ([privateKey], [publicKey], [privateKeyPassphrase]) use JVM array identity
+ * equality per Kotlin `data class` rules. Compare array content explicitly with [contentEquals]
+ * if equality checks are needed.
+ */
 data class SshConfig(
     val host: String = "",
     val port: Int = 22,
@@ -54,11 +64,29 @@ class SshSession(
     private val _hostKeyStatus = MutableStateFlow<SshHostKeyStatus>(SshHostKeyStatus.NotChecked)
     val hostKeyStatus: StateFlow<SshHostKeyStatus> = _hostKeyStatus.asStateFlow()
 
-    private var ioScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private val ioScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private val sessionOutputBuffer = TerminalOutputBuffer { text ->
+        terminalBuffer.write(text)
+    }
+
+    /**
+     * Dual-lock protocol:
+     *
+     * [connectMutex] — coroutine-level Mutex that serialises the entire connect / disconnect
+     * lifecycle.  It is suspending, so it never blocks a thread while waiting.
+     *
+     * [lifecycleLock] — JVM ReentrantLock that protects brief, non-suspending reads and writes of
+     * mutable fields (session, channel, streams, writerEndpoint, …).  It is held only for the
+     * duration of a few field assignments or reads, never across a suspension point, and never
+     * while waiting to acquire [connectMutex].  This one-way nesting order (connectMutex → then
+     * lifecycleLock, never the reverse) makes deadlock impossible.
+     *
+     * [connectionGeneration] — AtomicLong that lets background threads and coroutines detect
+     * stale generations without entering either lock.
+     */
     private val connectMutex = Mutex()
-    private val lifecycleLock = Any()
+    private val lifecycleLock = ReentrantLock()
     private val connectionGeneration = AtomicLong(0L)
-    private var outputBuffer: TerminalOutputBuffer? = null
     private var writerEndpoint: WriterEndpoint? = null
 
     private var session: Session? = null
@@ -77,20 +105,15 @@ class SshSession(
             disconnect()
         }
 
-        val generation = synchronized(lifecycleLock) {
+        val generation = lifecycleLock.jvmWithLock {
             _state.value = SshConnectionState.CONNECTING
             _errorMessage.value = null
             _hostKeyStatus.value = SshHostKeyStatus.NotChecked
             connectionGeneration.incrementAndGet()
         }
         terminalBuffer.clear()
-        val sessionOutput = TerminalOutputBuffer { text ->
-            if (connectionGeneration.get() == generation) terminalBuffer.write(text)
-        }
-        if (!installOutputBuffer(generation, sessionOutput)) {
-            sessionOutput.close()
-            return@withContext
-        }
+        sessionOutputBuffer.reset()
+
         var connectingSession: Session? = null
         var connectingChannel: ChannelShell? = null
         val jsch = JSch()
@@ -106,7 +129,7 @@ class SshSession(
             }
             jsch.setHostKeyRepository(
                 knownHostsStore.repository(config.host, config.port) { status ->
-                    synchronized(lifecycleLock) {
+                    lifecycleLock.jvmWithLock {
                         if (connectionGeneration.get() == generation) {
                             _hostKeyStatus.value = status
                         }
@@ -132,8 +155,8 @@ class SshSession(
             if (config.password.isNotEmpty()) {
                 sshSession.setPassword(config.password)
             }
-            sshSession.setTimeout(10000)
-            sshSession.connect(10000)
+            sshSession.setTimeout(SESSION_SOCKET_TIMEOUT_MS)
+            sshSession.connect(SESSION_CONNECT_TIMEOUT_MS)
             if (connectionGeneration.get() != generation) {
                 sshSession.disconnect()
                 return@withContext
@@ -161,7 +184,7 @@ class SshSession(
                 sshSession.disconnect()
                 return@withContext
             }
-            shellChannel.connect(5000)
+            shellChannel.connect(SHELL_CONNECT_TIMEOUT_MS)
             if (connectionGeneration.get() != generation) {
                 shellChannel.disconnect()
                 sshSession.disconnect()
@@ -176,8 +199,10 @@ class SshSession(
                     while (!Thread.currentThread().isInterrupted) {
                         val n = reader.read(buf)
                         if (n == -1) break
-                        val str = String(buf, 0, n)
-                        sessionOutput.add(str)
+                        if (connectionGeneration.get() == generation) {
+                            val str = String(buf, 0, n)
+                            sessionOutputBuffer.add(str)
+                        }
                     }
                     if (!Thread.currentThread().isInterrupted &&
                         connectionGeneration.get() == generation &&
@@ -205,7 +230,7 @@ class SshSession(
             // Installing all runtime resources and publishing CONNECTED share
             // the same lock as disconnect(), so a cancelled generation can
             // never become connected after its final generation check.
-            val writerScope = synchronized(lifecycleLock) {
+            val writerScope = lifecycleLock.jvmWithLock {
                 if (connectionGeneration.get() != generation) {
                     null
                 } else {
@@ -260,14 +285,14 @@ class SshSession(
      * exact fingerprint shown to the user. Call [connect] again afterwards.
      */
     fun trustPendingHostKey(expectedFingerprintSha256: String): Boolean {
-        return synchronized(lifecycleLock) {
+        return lifecycleLock.jvmWithLock {
             val presented = when (val status = _hostKeyStatus.value) {
                 is SshHostKeyStatus.Unknown -> status.presented
                 is SshHostKeyStatus.Changed -> status.presented
-                else -> return@synchronized false
+                else -> return@jvmWithLock false
             }
             if (presented.fingerprintSha256 != expectedFingerprintSha256) {
-                return@synchronized false
+                return@jvmWithLock false
             }
 
             val trusted = runCatching {
@@ -276,7 +301,7 @@ class SshSession(
                     ?: error("Trusted SSH host key could not be reloaded")
             }.getOrElse {
                 _errorMessage.value = "Failed to persist trusted SSH host key"
-                return@synchronized false
+                return@jvmWithLock false
             }
             _hostKeyStatus.value = SshHostKeyStatus.Trusted(trusted)
             true
@@ -307,16 +332,20 @@ class SshSession(
     }
 
     fun send(bytes: ByteArray) {
-        val endpoint = synchronized(lifecycleLock) {
+        val endpoint = lifecycleLock.jvmWithLock {
             writerEndpoint?.takeIf {
                 _state.value == SshConnectionState.CONNECTED &&
                     it.generation == connectionGeneration.get()
             }
         } ?: return
+        // ownedBytes is a defensive copy so the caller may immediately clear its buffer.
+        // The copy lives in the Channel queue until the writer coroutine flushes it, after
+        // which startWriter() calls fill(0).  This brief window of in-memory plaintext is
+        // an acceptable trade-off: the data is only ever a single pending SSH input packet.
         val ownedBytes = bytes.copyOf()
         if (endpoint.queue.trySend(ownedBytes).isFailure) {
             ownedBytes.fill(0)
-            synchronized(lifecycleLock) {
+            lifecycleLock.jvmWithLock {
                 if (writerEndpoint === endpoint &&
                     endpoint.generation == connectionGeneration.get()
                 ) {
@@ -371,12 +400,12 @@ class SshSession(
 
     fun resize(cols: Int, rows: Int) {
         if (cols <= 0 || rows <= 0 || _state.value != SshConnectionState.CONNECTED) return
-        val activeChannel = synchronized(lifecycleLock) { channel }
+        val activeChannel = lifecycleLock.jvmWithLock { channel }
         runCatching { activeChannel?.setPtySize(cols, rows, cols * 8, rows * 16) }
     }
 
     fun disconnect() {
-        synchronized(lifecycleLock) {
+        lifecycleLock.jvmWithLock {
             connectionGeneration.incrementAndGet()
             cleanupConnectionLocked(SshConnectionState.DISCONNECTED)
             _errorMessage.value = null
@@ -389,7 +418,7 @@ class SshSession(
         finalState: SshConnectionState = SshConnectionState.DISCONNECTED,
         errorMessage: String? = null,
     ) {
-        synchronized(lifecycleLock) {
+        lifecycleLock.jvmWithLock {
             if (connectionGeneration.get() != generation) return
             connectionGeneration.incrementAndGet()
             if (errorMessage != null) _errorMessage.value = errorMessage
@@ -406,10 +435,8 @@ class SshSession(
             }
         }
         writerEndpoint = null
-        outputBuffer?.clear()
-        outputBuffer = null
-        ioScope.cancel()
-        ioScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+        sessionOutputBuffer.reset()
+        ioScope.coroutineContext.cancelChildren()
         try {
             inputStream?.close()
         } catch (_: Exception) {}
@@ -431,18 +458,8 @@ class SshSession(
         _state.value = finalState
     }
 
-    private fun installOutputBuffer(
-        generation: Long,
-        candidate: TerminalOutputBuffer,
-    ): Boolean = synchronized(lifecycleLock) {
-        if (connectionGeneration.get() != generation) false else {
-            outputBuffer = candidate
-            true
-        }
-    }
-
     private fun installSession(generation: Long, candidate: Session): Boolean =
-        synchronized(lifecycleLock) {
+        lifecycleLock.jvmWithLock {
             if (connectionGeneration.get() != generation) false else {
                 session = candidate
                 true
@@ -450,7 +467,7 @@ class SshSession(
         }
 
     private fun installChannel(generation: Long, candidate: ChannelShell): Boolean =
-        synchronized(lifecycleLock) {
+        lifecycleLock.jvmWithLock {
             if (connectionGeneration.get() != generation) false else {
                 channel = candidate
                 true
@@ -458,7 +475,7 @@ class SshSession(
         }
 
     private fun installOutputStream(generation: Long, candidate: OutputStream): Boolean =
-        synchronized(lifecycleLock) {
+        lifecycleLock.jvmWithLock {
             if (connectionGeneration.get() != generation) false else {
                 outputStream = candidate
                 true
@@ -479,4 +496,9 @@ class SshSession(
         val generation: Long,
         val queue: Channel<ByteArray>,
     )
+    private companion object {
+        const val SESSION_CONNECT_TIMEOUT_MS = 10_000
+        const val SESSION_SOCKET_TIMEOUT_MS = 10_000
+        const val SHELL_CONNECT_TIMEOUT_MS = 5_000
+    }
 }

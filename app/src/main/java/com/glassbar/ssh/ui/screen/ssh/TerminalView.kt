@@ -17,6 +17,8 @@ import android.view.MenuItem
 import android.view.MotionEvent
 import android.view.ScaleGestureDetector
 import android.view.View
+import android.text.InputType
+import android.view.KeyCharacterMap
 import android.view.inputmethod.BaseInputConnection
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputConnection
@@ -35,6 +37,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
@@ -144,27 +147,44 @@ fun TerminalView(
     var showVirtualKeyboard by remember { mutableStateOf(false) }
     val terminalView = remember(context, buffer) { TerminalNativeView(context, buffer) }
 
-    // Callbacks can change while AndroidView retains the native view across recompositions.
-    LaunchedEffect(onKeyEvent, terminalView, buffer) {
+    val toggleVirtualKeyboard = {
+        showVirtualKeyboard = !showVirtualKeyboard
+        if (showVirtualKeyboard) {
+            terminalView.requestFocus()
+        }
+    }
+
+    // Wrap each callback in rememberUpdatedState so the LaunchedEffects below are keyed
+    // only on stable objects (terminalView, buffer).  Each new lambda from the caller is
+    // captured automatically without restarting the effect.
+    val currentOnKeyEvent by rememberUpdatedState(onKeyEvent)
+    val currentOnResize by rememberUpdatedState(onResize)
+    val currentOnFontScaleChange by rememberUpdatedState(onFontScaleChange)
+    val currentOnSelectionChange by rememberUpdatedState(onSelectionChange)
+    val currentOnCopyText by rememberUpdatedState(onCopyText)
+
+    LaunchedEffect(terminalView, buffer) {
         terminalView.keyListener = { key ->
             buffer.scrollToBottom()
-            onKeyEvent(key)
+            currentOnKeyEvent(key)
         }
     }
     LaunchedEffect(terminalView) {
-        terminalView.onFocusChanged = { showVirtualKeyboard = it }
+        terminalView.onFocusChanged = { hasFocus ->
+            showVirtualKeyboard = hasFocus || showVirtualKeyboard
+        }
     }
-    LaunchedEffect(onResize, terminalView) {
-        terminalView.onTerminalSizeChanged = onResize
+    LaunchedEffect(terminalView) {
+        terminalView.onTerminalSizeChanged = { cols, rows -> currentOnResize(cols, rows) }
     }
-    LaunchedEffect(onFontScaleChange, terminalView) {
-        terminalView.onFontScaleChanged = onFontScaleChange
+    LaunchedEffect(terminalView) {
+        terminalView.onFontScaleChanged = { scale -> currentOnFontScaleChange(scale) }
     }
-    LaunchedEffect(onSelectionChange, terminalView) {
-        terminalView.onSelectionChanged = onSelectionChange
+    LaunchedEffect(terminalView) {
+        terminalView.onSelectionChanged = { sel -> currentOnSelectionChange(sel) }
     }
-    LaunchedEffect(onCopyText, terminalView) {
-        terminalView.onTextCopied = onCopyText
+    LaunchedEffect(terminalView) {
+        terminalView.onTextCopied = { txt -> currentOnCopyText(txt) }
     }
     LaunchedEffect(fontScale, terminalView) {
         terminalView.setFontScale(fontScale, notify = false)
@@ -236,8 +256,6 @@ private class TerminalNativeView(
     private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
     private val drawClipBounds = Rect()
     private val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-    private val inputMethodManager =
-        context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
 
     private val baseTextSizePx = TypedValue.applyDimension(
         TypedValue.COMPLEX_UNIT_SP,
@@ -249,6 +267,12 @@ private class TerminalNativeView(
     private var lastRows = -1
     private var lastDeleteSurroundingTime = 0L
     private var scrollFraction = 0f
+
+    // Cached cell geometry — recomputed only in recalculateTerminalSize(), read in onDraw().
+    // Avoids calling measureText/fontMetrics on every frame (~120 calls/s at 60 fps).
+    private var cachedCellWidth = 1f
+    private var cachedCellHeight = 1f
+    private var cachedFontBaseline = 0f  // offset from row-top to text baseline
 
     private var selection: TerminalSelection? = null
     private var selectionAnchor: TerminalPosition? = null
@@ -297,11 +321,6 @@ private class TerminalNativeView(
         isFocusableInTouchMode = true
         setOnFocusChangeListener { _, hasFocus ->
             mainHandler.post { onFocusChanged(hasFocus) }
-            if (hasFocus) {
-                inputMethodManager.showSoftInput(this, 0)
-            } else {
-                inputMethodManager.hideSoftInputFromWindow(windowToken, 0)
-            }
         }
     }
 
@@ -323,7 +342,14 @@ private class TerminalNativeView(
 
     fun focusAndShowKeyboard() {
         if (!hasFocus()) requestFocus()
-        inputMethodManager.showSoftInput(this, 0)
+        val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
+        imm?.showSoftInput(this, InputMethodManager.SHOW_IMPLICIT)
+        post { 
+            // Keep the custom soft keyboard visible after a tap or toolbar action.
+            if (parent != null) {
+                parent.requestDisallowInterceptTouchEvent(true)
+            }
+        }
     }
 
     fun pasteText(text: String) {
@@ -397,6 +423,10 @@ private class TerminalNativeView(
         if (columns == lastColumns && rows == lastRows) return
         lastColumns = columns
         lastRows = rows
+        // Update cached geometry so onDraw() can skip re-measuring.
+        cachedCellWidth = width.toFloat() / columns
+        cachedCellHeight = height.toFloat() / rows
+        cachedFontBaseline = (cachedCellHeight - metrics.descent - metrics.ascent) / 2f
         buffer.resize(rows, columns)
         onTerminalSizeChanged(columns, rows)
     }
@@ -532,11 +562,11 @@ private class TerminalNativeView(
         selectionActionMode = startActionMode(
             object : ActionMode.Callback {
                 override fun onCreateActionMode(mode: ActionMode, menu: Menu): Boolean {
-                    menu.add(Menu.NONE, MENU_COPY, 0, "Copy")
+                    menu.add(Menu.NONE, MENU_COPY, 0, context.getString(android.R.string.copy))
                         .setShowAsAction(MenuItem.SHOW_AS_ACTION_ALWAYS)
-                    menu.add(Menu.NONE, MENU_PASTE, 1, "Paste")
+                    menu.add(Menu.NONE, MENU_PASTE, 1, context.getString(android.R.string.paste))
                         .setShowAsAction(MenuItem.SHOW_AS_ACTION_IF_ROOM)
-                    menu.add(Menu.NONE, MENU_SELECT_ALL, 2, "Select all")
+                    menu.add(Menu.NONE, MENU_SELECT_ALL, 2, context.getString(android.R.string.selectAll))
                         .setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER)
                     return true
                 }
@@ -586,21 +616,31 @@ private class TerminalNativeView(
     override fun onCheckIsTextEditor(): Boolean = true
 
     override fun onCreateInputConnection(outAttrs: EditorInfo): InputConnection {
-        outAttrs.inputType = android.text.InputType.TYPE_CLASS_TEXT or
-            android.text.InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD or
-            android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
-        outAttrs.imeOptions = EditorInfo.IME_ACTION_NONE or
-            EditorInfo.IME_FLAG_NO_ENTER_ACTION or
-            EditorInfo.IME_FLAG_NO_EXTRACT_UI or
-            EditorInfo.IME_FLAG_NO_FULLSCREEN
+        outAttrs.inputType = InputType.TYPE_CLASS_TEXT or
+            InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD or
+            InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+        outAttrs.imeOptions = EditorInfo.IME_ACTION_NONE or EditorInfo.IME_FLAG_NO_FULLSCREEN
+
         return object : BaseInputConnection(this, false) {
             override fun commitText(text: CharSequence?, newCursorPosition: Int): Boolean {
-                text?.toString()?.replace('\n', '\r')?.takeIf { it.isNotEmpty() }?.let(keyListener)
+                runCatching {
+                    if (!text.isNullOrEmpty()) {
+                        pasteText(text.toString())
+                    }
+                }
                 return true
             }
 
             override fun setComposingText(text: CharSequence?, newCursorPosition: Int): Boolean {
-                // Only committed text is forwarded, which avoids duplicate IME composition text.
+                runCatching {
+                    if (!text.isNullOrEmpty()) {
+                        pasteText(text.toString())
+                    }
+                }
+                return true
+            }
+
+            override fun setComposingRegion(start: Int, end: Int): Boolean {
                 return true
             }
 
@@ -608,60 +648,44 @@ private class TerminalNativeView(
                 return true
             }
 
-            override fun setSelection(start: Int, end: Int): Boolean {
-                return true
-            }
-
             override fun deleteSurroundingText(beforeLength: Int, afterLength: Int): Boolean {
-                lastDeleteSurroundingTime = System.currentTimeMillis()
-                repeat(beforeLength.coerceIn(0, 200)) { keyListener("\u007F") }
-                repeat(afterLength.coerceIn(0, 200)) { keyListener("\u001B[3~") }
-                return true
-            }
-
-            override fun deleteSurroundingTextInCodePoints(beforeLength: Int, afterLength: Int): Boolean {
-                lastDeleteSurroundingTime = System.currentTimeMillis()
-                repeat(beforeLength.coerceIn(0, 200)) { keyListener("\u007F") }
-                repeat(afterLength.coerceIn(0, 200)) { keyListener("\u001B[3~") }
-                return true
-            }
-
-            override fun sendKeyEvent(event: KeyEvent): Boolean {
-                if (event.action != KeyEvent.ACTION_DOWN) return true
-                if (event.keyCode == KeyEvent.KEYCODE_DEL) {
-                    if (System.currentTimeMillis() - lastDeleteSurroundingTime > 80) {
-                        keyListener("\u007F")
+                runCatching {
+                    val count = if (beforeLength <= 0) 1 else beforeLength
+                    val now = System.currentTimeMillis()
+                    if (now - lastDeleteSurroundingTime > 30) {
+                        lastDeleteSurroundingTime = now
+                        repeat(count) {
+                            keyListener("\u007F")
+                        }
                     }
-                    return true
-                }
-                if (event.keyCode == KeyEvent.KEYCODE_ENTER) {
-                    keyListener("\r")
-                    return true
-                }
-                if (event.isCtrlPressed || event.unicodeChar == 0) {
-                    keyEventToString(event)?.let(keyListener)
                 }
                 return true
             }
 
             override fun performEditorAction(actionCode: Int): Boolean {
-                if (
-                    actionCode == EditorInfo.IME_ACTION_SEND ||
-                    actionCode == EditorInfo.IME_ACTION_DONE ||
-                    actionCode == EditorInfo.IME_ACTION_GO
-                ) {
+                runCatching {
                     keyListener("\r")
-                    return true
                 }
-                return super.performEditorAction(actionCode)
+                return true
+            }
+
+            override fun sendKeyEvent(event: KeyEvent): Boolean {
+                runCatching {
+                    if (event.action == KeyEvent.ACTION_DOWN) {
+                        return this@TerminalNativeView.onKeyDown(event.keyCode, event)
+                    }
+                }
+                return true
             }
         }
     }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
-        keyEventToString(event)?.let {
-            keyListener(it)
-            return true
+        runCatching {
+            keyEventToString(event)?.let {
+                keyListener(it)
+                return true
+            }
         }
         return super.onKeyDown(keyCode, event)
     }
@@ -670,97 +694,90 @@ private class TerminalNativeView(
         super.onDraw(canvas)
         if (width <= 0 || height <= 0) return
 
-        val snapshot = buffer.snapshot()
-        val drawColumns = snapshot.cols.coerceAtLeast(1)
-        val drawRows = snapshot.rows.coerceAtLeast(1)
-        val cellWidth = width.toFloat() / drawColumns
-        val cellHeight = height.toFloat() / drawRows
+        runCatching {
+            val snapshot = buffer.snapshot()
+            val drawColumns = snapshot.cols.coerceAtLeast(1)
+            val drawRows = snapshot.rows.coerceAtLeast(1)
 
-        textPaint.textSize = baseTextSizePx * terminalFontScale
-        var measuredWidth = textPaint.measureText("M")
-        if (measuredWidth > cellWidth && measuredWidth > 0f) {
-            textPaint.textSize *= cellWidth / measuredWidth
-        }
-        var metrics = textPaint.fontMetrics
-        val measuredHeight = metrics.descent - metrics.ascent
-        if (measuredHeight > cellHeight && measuredHeight > 0f) {
-            textPaint.textSize *= cellHeight / measuredHeight
-            metrics = textPaint.fontMetrics
-        }
+            val cellWidth = if (cachedCellWidth > 0f) cachedCellWidth else width.toFloat() / drawColumns
+            val cellHeight = if (cachedCellHeight > 0f) cachedCellHeight else height.toFloat() / drawRows
+            val fontBaseline = cachedFontBaseline
 
-        canvas.drawColor(theme.background)
-        val normalizedSelection = selection?.normalized()
-        canvas.getClipBounds(drawClipBounds)
-        val clip = drawClipBounds
-        val firstVisibleRow = floor(clip.top / cellHeight).toInt().coerceIn(0, drawRows - 1)
-        val lastVisibleRow = floor((clip.bottom - 1).coerceAtLeast(0) / cellHeight)
-            .toInt()
-            .coerceIn(firstVisibleRow, drawRows - 1)
-        val firstVisibleColumn = (floor(clip.left / cellWidth).toInt() - 1)
-            .coerceIn(0, drawColumns - 1)
-        val lastVisibleColumn = floor((clip.right - 1).coerceAtLeast(0) / cellWidth)
-            .toInt()
-            .coerceIn(firstVisibleColumn, drawColumns - 1)
-        for (visibleRow in firstVisibleRow..lastVisibleRow) {
-            val line = snapshot.lines[visibleRow]
-            val rowTop = visibleRow * cellHeight
-            if (rowTop >= height) break
-            val absoluteRow = snapshot.viewportTop + visibleRow
-            val finalColumn = minOf(line.size - 1, lastVisibleColumn)
-            for (column in firstVisibleColumn..finalColumn) {
-                val cell = line[column]
-                val left = column * cellWidth
-                val background = when {
-                    isSelected(normalizedSelection, absoluteRow, column) ||
-                        (cell.wideContinuation && isSelected(
-                            normalizedSelection,
-                            absoluteRow,
-                            column - 1,
-                        )) -> theme.selection
-                    cell.inverse -> if (cell.fg == TerminalColors.DEFAULT_FG) {
+            canvas.drawColor(theme.background)
+            val normalizedSelection = selection?.normalized()
+            canvas.getClipBounds(drawClipBounds)
+            val clip = drawClipBounds
+            val firstVisibleRow = floor(clip.top / cellHeight).toInt().coerceIn(0, drawRows - 1)
+            val lastVisibleRow = floor((clip.bottom - 1).coerceAtLeast(0) / cellHeight)
+                .toInt()
+                .coerceIn(firstVisibleRow, drawRows - 1)
+            val firstVisibleColumn = (floor(clip.left / cellWidth).toInt() - 1)
+                .coerceIn(0, drawColumns - 1)
+            val lastVisibleColumn = floor((clip.right - 1).coerceAtLeast(0) / cellWidth)
+                .toInt()
+                .coerceIn(firstVisibleColumn, drawColumns - 1)
+            for (visibleRow in firstVisibleRow..lastVisibleRow) {
+                if (visibleRow >= snapshot.lines.size) break
+                val line = snapshot.lines[visibleRow]
+                val rowTop = visibleRow * cellHeight
+                if (rowTop >= height) break
+                val absoluteRow = snapshot.viewportTop + visibleRow
+                val finalColumn = minOf(line.size - 1, lastVisibleColumn)
+                for (column in firstVisibleColumn..finalColumn) {
+                    if (column >= line.size) break
+                    val cell = line[column]
+                    val left = column * cellWidth
+                    val background = when {
+                        isSelected(normalizedSelection, absoluteRow, column) ||
+                            (cell.wideContinuation && isSelected(
+                                normalizedSelection,
+                                absoluteRow,
+                                column - 1,
+                            )) -> theme.selection
+                        cell.inverse -> if (cell.fg == TerminalColors.DEFAULT_FG) {
+                            theme.foreground
+                        } else {
+                            TerminalColors.fg(cell.fg)
+                        }
+                        cell.bg != TerminalColors.DEFAULT_BG -> TerminalColors.bg(cell.bg)
+                        else -> null
+                    }
+                    if (background != null) {
+                        backgroundPaint.color = background
+                        canvas.drawRect(left, rowTop, left + cellWidth, rowTop + cellHeight, backgroundPaint)
+                    }
+
+                    if (cell.char == ' ' || cell.wideContinuation) continue
+                    textPaint.color = if (cell.inverse) {
+                        if (cell.bg == TerminalColors.DEFAULT_BG) theme.background else TerminalColors.bg(cell.bg)
+                    } else if (cell.fg == TerminalColors.DEFAULT_FG) {
                         theme.foreground
                     } else {
                         TerminalColors.fg(cell.fg)
                     }
-                    cell.bg != TerminalColors.DEFAULT_BG -> TerminalColors.bg(cell.bg)
-                    else -> null
+                    textPaint.isFakeBoldText = cell.bold
+                    textPaint.isUnderlineText = cell.underline
+                    val baseline = rowTop + fontBaseline
+                    drawCharacter[0] = cell.char
+                    canvas.drawText(drawCharacter, 0, 1, left, baseline, textPaint)
                 }
-                if (background != null) {
-                    backgroundPaint.color = background
-                    canvas.drawRect(left, rowTop, left + cellWidth, rowTop + cellHeight, backgroundPaint)
-                }
-
-                if (cell.char == ' ' || cell.wideContinuation) continue
-                textPaint.color = if (cell.inverse) {
-                    if (cell.bg == TerminalColors.DEFAULT_BG) theme.background else TerminalColors.bg(cell.bg)
-                } else if (cell.fg == TerminalColors.DEFAULT_FG) {
-                    theme.foreground
-                } else {
-                    TerminalColors.fg(cell.fg)
-                }
-                textPaint.isFakeBoldText = cell.bold
-                textPaint.isUnderlineText = cell.underline
-                val baseline = rowTop + (cellHeight - metrics.descent - metrics.ascent) / 2f
-                // Avoid allocating a one-character String for every painted cell.
-                drawCharacter[0] = cell.char
-                canvas.drawText(drawCharacter, 0, 1, left, baseline, textPaint)
             }
-        }
 
-        val visibleCursorRow = snapshot.cursorRow - snapshot.viewportTop
-        if (
-            cursorPhaseVisible && snapshot.cursorVisible &&
-            visibleCursorRow in 0 until drawRows
-        ) {
-            val visibleCursorColumn = snapshot.cursorCol.coerceIn(0, drawColumns - 1)
-            cursorPaint.color = theme.cursor
-            canvas.drawRect(
-                visibleCursorColumn * cellWidth,
-                visibleCursorRow * cellHeight,
-                (visibleCursorColumn + 1) * cellWidth,
-                (visibleCursorRow + 1) * cellHeight,
-                cursorPaint,
-            )
+            val visibleCursorRow = snapshot.cursorRow - snapshot.viewportTop
+            if (
+                cursorPhaseVisible && snapshot.cursorVisible &&
+                visibleCursorRow in 0 until drawRows
+            ) {
+                val visibleCursorColumn = snapshot.cursorCol.coerceIn(0, drawColumns - 1)
+                cursorPaint.color = theme.cursor
+                canvas.drawRect(
+                    visibleCursorColumn * cellWidth,
+                    visibleCursorRow * cellHeight,
+                    (visibleCursorColumn + 1) * cellWidth,
+                    (visibleCursorRow + 1) * cellHeight,
+                    cursorPaint,
+                )
+            }
         }
     }
 
@@ -810,6 +827,15 @@ private class TerminalNativeView(
 }
 
 private fun keyEventToString(event: KeyEvent): String? {
+    val baseSequence = getBaseKeySequence(event) ?: return null
+    return if (event.isAltPressed && !baseSequence.startsWith("\u001B")) {
+        "\u001B$baseSequence"
+    } else {
+        baseSequence
+    }
+}
+
+private fun getBaseKeySequence(event: KeyEvent): String? {
     if (event.isCtrlPressed) {
         return when (event.keyCode) {
             KeyEvent.KEYCODE_A -> "\u0001"
@@ -842,7 +868,7 @@ private fun keyEventToString(event: KeyEvent): String? {
             else -> null
         }
     }
-    val character = event.unicodeChar
+    val character = event.unicodeChar and KeyCharacterMap.COMBINING_ACCENT_MASK.inv()
     if (character != 0 && Character.isValidCodePoint(character)) {
         return String(Character.toChars(character))
     }
