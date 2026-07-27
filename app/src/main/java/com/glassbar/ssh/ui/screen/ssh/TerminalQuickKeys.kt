@@ -44,6 +44,8 @@ fun TerminalQuickKeys(
     ) {
         QuickKey("Esc", "\u001B", keyHeight, keyBgColor, textColor, onKey)
         QuickKey("Tab", "\t", keyHeight, keyBgColor, textColor, onKey)
+        QuickKey("Bksp", "\u007F", keyHeight, keyBgColor, textColor, onKey)
+        QuickKey("Del", "\u001B[3~", keyHeight, keyBgColor, textColor, onKey)
         QuickKey("Ctrl+C", "\u0003", keyHeight, keyBgColor, textColor, onKey)
         QuickKey("Ctrl+D", "\u0004", keyHeight, keyBgColor, textColor, onKey)
         QuickKey("Ctrl+Z", "\u001A", keyHeight, keyBgColor, textColor, onKey)
