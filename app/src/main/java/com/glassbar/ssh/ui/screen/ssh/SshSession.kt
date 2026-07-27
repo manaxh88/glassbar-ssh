@@ -52,7 +52,7 @@ data class SshConfig(
 )
 
 class SshSession(
-    private val terminalBuffer: TerminalBuffer,
+    private val terminalState: TerminalState,
     private val knownHostsStore: SshKnownHostsStore = SshKnownHostsStore(glassBarApp),
 ) {
     private val _state = MutableStateFlow(SshConnectionState.DISCONNECTED)
@@ -65,9 +65,6 @@ class SshSession(
     val hostKeyStatus: StateFlow<SshHostKeyStatus> = _hostKeyStatus.asStateFlow()
 
     private val ioScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
-    private val sessionOutputBuffer = TerminalOutputBuffer { text ->
-        terminalBuffer.write(text)
-    }
 
     /**
      * Dual-lock protocol:
@@ -111,8 +108,7 @@ class SshSession(
             _hostKeyStatus.value = SshHostKeyStatus.NotChecked
             connectionGeneration.incrementAndGet()
         }
-        terminalBuffer.clear()
-        sessionOutputBuffer.reset()
+        terminalState.clear()
 
         var connectingSession: Session? = null
         var connectingChannel: ChannelShell? = null
@@ -172,10 +168,7 @@ class SshSession(
             }
 
             // Request a pseudo-terminal
-            shellChannel.setPtySize(
-                terminalBuffer.cols, terminalBuffer.rows,
-                terminalBuffer.cols * 8, terminalBuffer.rows * 16
-            )
+            shellChannel.setPtySize(80, 24, 640, 384)
             shellChannel.setPtyType("xterm-256color")
 
             val shellOutput = shellChannel.outputStream
@@ -201,7 +194,7 @@ class SshSession(
                         if (n == -1) break
                         if (connectionGeneration.get() == generation) {
                             val str = String(buf, 0, n)
-                            sessionOutputBuffer.add(str)
+                            terminalState.write(str)
                         }
                     }
                     if (!Thread.currentThread().isInterrupted &&
@@ -435,7 +428,6 @@ class SshSession(
             }
         }
         writerEndpoint = null
-        sessionOutputBuffer.reset()
         ioScope.coroutineContext.cancelChildren()
         try {
             inputStream?.close()

@@ -214,8 +214,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             )
         } catch (error: CancellationException) {
             throw error
-        } catch (_: Exception) {
-            ServerStats(error = context.getString(R.string.server_stats_unavailable))
+        } catch (error: Exception) {
+            ServerStats(error = error.message ?: error.javaClass.simpleName)
         } finally {
             privateKey?.fill(0)
         }

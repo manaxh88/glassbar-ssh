@@ -31,10 +31,14 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.ContentPaste
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Key
+import androidx.compose.material.icons.rounded.PowerSettingsNew
+import androidx.compose.material.icons.rounded.Remove
 import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.material3.Checkbox
@@ -46,11 +50,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -90,17 +94,14 @@ fun SshScreen(
     var localErrorMessage by remember { mutableStateOf<String?>(null) }
     var dismissedHostFingerprint by remember { mutableStateOf<String?>(null) }
     var terminalFontScale by rememberSaveable { mutableFloatStateOf(1f) }
-    var terminalSelection by remember { mutableStateOf<TerminalSelection?>(null) }
 
     val textColor = MiuixTheme.colorScheme.onSurface
     val secondaryTextColor = MiuixTheme.colorScheme.onSurfaceVariantSummary
-    val terminalTheme = if (isInDarkTheme()) TerminalTheme.Dark else TerminalTheme.Light
     val invalidPortMessage = stringResource(R.string.connection_port_invalid)
     val privateKeyReadFailedMessage = stringResource(R.string.private_key_read_failed)
     val privateKeyPermissionFailedMessage = stringResource(R.string.private_key_permission_failed)
     val connectionSaveFailedMessage = stringResource(R.string.connection_storage_write_failed)
     val hostKeySaveFailedMessage = stringResource(R.string.host_key_save_failed)
-    val terminalController = rememberTerminalController()
     val privateKeyPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument(),
     ) { uri ->
@@ -114,7 +115,7 @@ fun SshScreen(
     }
 
     val sshViewModel = viewModel<SshViewModel>()
-    val terminalBuffer = sshViewModel.terminalBuffer
+    val terminalState = sshViewModel.terminalState
     val sshSession = sshViewModel.session
     val connectionState by sshSession.state.collectAsStateWithLifecycle()
     val errorMessage by sshSession.errorMessage.collectAsStateWithLifecycle()
@@ -203,10 +204,6 @@ fun SshScreen(
         mainPagerState.isScrollLocked = isConnected
         if (isConnected) {
             replaceLastConfig(null)
-            password = ""
-            showPassword = false
-            privateKeyPassphrase = ""
-            showKeyPassphrase = false
         } else if (
             connectionState == SshConnectionState.ERROR &&
             hostKeyStatus !is SshHostKeyStatus.Unknown &&
@@ -468,73 +465,91 @@ fun SshScreen(
             enter = fadeIn(),
             exit = fadeOut(),
         ) {
-            Column(modifier = Modifier.fillMaxSize()) {
-                // Status bar
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(MiuixTheme.colorScheme.surface)
+            ) {
+                // Modernized App Bar
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .background(MiuixTheme.colorScheme.surfaceVariant)
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                        .background(MiuixTheme.colorScheme.surfaceContainer.copy(alpha = 0.8f))
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
+                    // Connection Indicator
                     Box(
-                        modifier = Modifier.size(8.dp)
-                            .clip(RoundedCornerShape(4.dp))
-                            .background(MiuixTheme.colorScheme.primary)
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Text(
-                        text = "${username}@${host}:${port}",
-                        color = textColor, fontSize = 13.sp,
-                        modifier = Modifier.weight(1f),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    Icon(
-                        imageVector = Icons.Rounded.ContentCopy,
-                        contentDescription = stringResource(R.string.copy_selected_text),
-                        tint = if (terminalSelection != null) {
-                            MiuixTheme.colorScheme.primary
-                        } else {
-                            secondaryTextColor
-                        },
                         modifier = Modifier
-                            .size(22.dp)
-                            .clickable(enabled = terminalSelection != null) {
-                                terminalController.copySelection()
-                            },
+                            .size(10.dp)
+                            .clip(RoundedCornerShape(5.dp))
+                            .background(Color(0xFF4CAF50)) // Green for connected
                     )
                     Spacer(Modifier.width(12.dp))
-                    Icon(
-                        imageVector = Icons.Rounded.ContentPaste,
-                        contentDescription = stringResource(R.string.paste),
-                        tint = MiuixTheme.colorScheme.primary,
-                        modifier = Modifier
-                            .size(22.dp)
-                            .clickable { terminalController.pasteFromClipboard() },
-                    )
-                    Spacer(Modifier.width(12.dp))
-                    BlueButton(
-                        onClick = { sshViewModel.disconnect() },
-                        modifier = Modifier.height(32.dp),
-                    ) {
+                    Row(modifier = Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
                         Text(
-                            stringResource(R.string.action_disconnect),
-                            fontSize = 12.sp,
-                            color = Color.White,
+                            text = username,
+                            color = Color(0xFF4CAF50),
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        Text(
+                            text = "@${host}",
+                            color = textColor,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                         )
                     }
+                    
+                    // Tools
+                    Icon(
+                        imageVector = Icons.Rounded.Remove,
+                        contentDescription = "Zoom Out",
+                        tint = secondaryTextColor,
+                        modifier = Modifier
+                            .size(24.dp)
+                            .clickable { terminalFontScale = (terminalFontScale - 0.1f).coerceAtLeast(0.5f) },
+                    )
+                    Spacer(Modifier.width(16.dp))
+                    Icon(
+                        imageVector = Icons.Rounded.Add,
+                        contentDescription = "Zoom In",
+                        tint = secondaryTextColor,
+                        modifier = Modifier
+                            .size(24.dp)
+                            .clickable { terminalFontScale = (terminalFontScale + 0.1f).coerceAtMost(3.0f) },
+                    )
+                    Spacer(Modifier.width(16.dp))
+                    Icon(
+                        imageVector = Icons.Rounded.Delete,
+                        contentDescription = "Clear",
+                        tint = secondaryTextColor,
+                        modifier = Modifier
+                            .size(22.dp)
+                            .clickable {
+                                terminalState.clear()
+                                sshSession.send("\u000C")
+                            },
+                    )
+                    Spacer(Modifier.width(16.dp))
+                    Icon(
+                        imageVector = Icons.Rounded.PowerSettingsNew,
+                        contentDescription = stringResource(R.string.action_disconnect),
+                        tint = MiuixTheme.colorScheme.error,
+                        modifier = Modifier
+                            .size(24.dp)
+                            .clickable { sshViewModel.disconnect() },
+                    )
                 }
 
-                TerminalView(
-                    buffer = terminalBuffer,
-                    onKeyEvent = { key -> sshSession.send(key) },
-                    onResize = { cols, rows -> sshSession.resize(cols, rows) },
-                    controller = terminalController,
-                    theme = terminalTheme,
+                // The New Compose Terminal Console View
+                TerminalConsoleView(
+                    terminalState = terminalState,
+                    onSendInput = { key -> sshSession.send(key) },
                     fontScale = terminalFontScale,
-                    onFontScaleChange = { terminalFontScale = it },
-                    onSelectionChange = { terminalSelection = it },
+                    isDark = isInDarkTheme(),
                     modifier = Modifier.fillMaxSize().weight(1f),
                 )
             }

@@ -398,7 +398,7 @@ fun HomeScreen(
                                         conn.password.isBlank() && conn.privateKeyUri.isBlank() ->
                                             stringResource(R.string.server_stats_no_saved_credentials)
                                         stats == null -> stringResource(R.string.server_stats_waiting)
-                                        hasError -> stringResource(
+                                        hasError -> stats?.error ?: stringResource(
                                             R.string.server_stats_failed,
                                             updatedTime.orEmpty(),
                                         )
@@ -413,7 +413,7 @@ fun HomeScreen(
                                         secondaryTextColor
                                     },
                                     fontSize = 9.sp,
-                                    maxLines = 1,
+                                    maxLines = if (hasError) 4 else 1,
                                     overflow = TextOverflow.Ellipsis,
                                 )
                             }

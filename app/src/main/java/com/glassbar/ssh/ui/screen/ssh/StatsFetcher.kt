@@ -62,17 +62,44 @@ object StatsFetcher {
      */
     private val statsCommand = """
         LC_ALL=C
-        read _ u1 n1 s1 i1 w1 q1 sq1 st1 _ < /proc/stat
+        read -r _ u1 n1 s1 i1 w1 q1 sq1 st1 _ < /proc/stat 2>/dev/null
+        u1=${'$'}{u1:-0} n1=${'$'}{n1:-0} s1=${'$'}{s1:-0} i1=${'$'}{i1:-0} w1=${'$'}{w1:-0} q1=${'$'}{q1:-0} sq1=${'$'}{sq1:-0} st1=${'$'}{st1:-0}
         t1=${'$'}((u1+n1+s1+i1+w1+q1+sq1+st1))
         idle1=${'$'}((i1+w1))
         sleep 0.2
-        read _ u2 n2 s2 i2 w2 q2 sq2 st2 _ < /proc/stat
+        read -r _ u2 n2 s2 i2 w2 q2 sq2 st2 _ < /proc/stat 2>/dev/null
+        u2=${'$'}{u2:-0} n2=${'$'}{n2:-0} s2=${'$'}{s2:-0} i2=${'$'}{i2:-0} w2=${'$'}{w2:-0} q2=${'$'}{q2:-0} sq2=${'$'}{sq2:-0} st2=${'$'}{st2:-0}
         t2=${'$'}((u2+n2+s2+i2+w2+q2+sq2+st2))
         idle2=${'$'}((i2+w2))
         total=${'$'}((t2-t1))
         busy=${'$'}((total-(idle2-idle1)))
-        awk -v busy="${'$'}busy" -v total="${'$'}total" 'BEGIN { printf "CPU=%.2f\n", total > 0 ? busy * 100 / total : 0 }'
-        awk '/^MemTotal:/ { total=${'$'}2 } /^MemAvailable:/ { available=${'$'}2 } /^MemFree:/ { free=${'$'}2 } /^Buffers:/ { buffers=${'$'}2 } /^Cached:/ { cached=${'$'}2 } END { if (!available) available=free+buffers+cached; printf "MEM=%.2f\n", total > 0 ? (total-available) * 100 / total : 0 }' /proc/meminfo
+        if [ "${'$'}total" -gt 0 ] 2>/dev/null; then
+            cpu=${'$'}((busy * 100 / total))
+        else
+            cpu=0
+        fi
+        echo "CPU=${'$'}cpu"
+        
+        mem_free=0; mem_buffers=0; mem_cached=0; mem_avail=""
+        while read -r key value _; do
+            case "${'$'}key" in
+                MemTotal:) mem_total=${'$'}value ;;
+                MemAvailable:) mem_avail=${'$'}value ;;
+                MemFree:) mem_free=${'$'}value ;;
+                Buffers:) mem_buffers=${'$'}value ;;
+                Cached:) mem_cached=${'$'}value ;;
+            esac
+        done < /proc/meminfo 2>/dev/null
+        if [ -z "${'$'}mem_avail" ]; then
+            mem_avail=${'$'}((mem_free + mem_buffers + mem_cached))
+        fi
+        if [ -n "${'$'}mem_total" ] && [ "${'$'}mem_total" -gt 0 ] 2>/dev/null; then
+            mem_used=${'$'}((mem_total - mem_avail))
+            mem=${'$'}((mem_used * 100 / mem_total))
+        else
+            mem=0
+        fi
+        echo "MEM=${'$'}mem"
     """.trimIndent()
 
     /**

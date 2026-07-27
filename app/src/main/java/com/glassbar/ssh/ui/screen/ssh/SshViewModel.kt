@@ -6,8 +6,8 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
 class SshViewModel : ViewModel() {
-    val terminalBuffer = TerminalBuffer(rows = 24, cols = 80)
-    val session = SshSession(terminalBuffer)
+    val terminalState = TerminalState()
+    val session = SshSession(terminalState)
 
     private var connectJob: Job? = null
     private val configLock = Any()
