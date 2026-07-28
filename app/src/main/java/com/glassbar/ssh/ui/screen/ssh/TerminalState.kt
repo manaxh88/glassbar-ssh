@@ -21,9 +21,71 @@ class TerminalState {
 
     fun write(text: String) {
         synchronized(lock) {
-            rawBuffer.append(text)
+            for (ch in text) {
+                if (ch == '\b') {
+                    val idx = findLastVisibleCharIndex(rawBuffer)
+                    if (idx != -1) {
+                        rawBuffer.deleteCharAt(idx)
+                    }
+                } else {
+                    rawBuffer.append(ch)
+                }
+            }
             processBufferLocked()
         }
+    }
+
+    private fun findLastVisibleCharIndex(sb: StringBuilder): Int {
+        var i = sb.length - 1
+        while (i >= 0) {
+            val ch = sb[i]
+            
+            // 1. Skip CSI sequences: \u001B[ ... a-zA-Z
+            if ((ch in 'a'..'z' || ch in 'A'..'Z') && i >= 2) {
+                var j = i - 1
+                var foundEscape = false
+                while (j >= 0 && i - j < 20) {
+                    if (sb[j] == '[' && j >= 1 && sb[j-1] == '\u001B') {
+                        foundEscape = true
+                        i = j - 2
+                        break
+                    }
+                    if (sb[j] !in '0'..'9' && sb[j] != ';' && sb[j] != '?') {
+                        break
+                    }
+                    j--
+                }
+                if (foundEscape) continue
+            }
+            
+            // 2. Skip OSC sequences: \u001B] ... \u0007 or \u001B\
+            if (ch == '\u0007' || ch == '\\') {
+                var j = i - 1
+                if (ch == '\\' && j >= 0 && sb[j] == '\u001B') {
+                    j--
+                }
+                var foundEscape = false
+                while (j >= 0 && i - j < 512) {
+                    if (sb[j] == ']' && j >= 1 && sb[j-1] == '\u001B') {
+                        foundEscape = true
+                        i = j - 2
+                        break
+                    }
+                    j--
+                }
+                if (foundEscape) continue
+            }
+            
+            // 3. Skip 2-char escape sequences: \u001B followed by anything
+            if (i >= 1 && sb[i-1] == '\u001B') {
+                i -= 2
+                continue
+            }
+            
+            // This is a visible character (or a control character we don't care about skipping)
+            return i
+        }
+        return -1
     }
 
     fun clear() {

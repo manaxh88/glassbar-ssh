@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name" translatable="false">GlassBar SSH</string>
+    <string name="app_name" translatable="false">LucidSSH</string>
     <string name="servers">Servers</string>
     <string name="terminal">Terminal</string>
     <string name="about">About</string>

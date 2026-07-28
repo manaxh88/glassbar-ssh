@@ -9,9 +9,13 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.ime
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -64,10 +68,14 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.launch
 import com.glassbar.ssh.R
 import com.glassbar.ssh.ui.LocalMainPagerState
+import com.glassbar.ssh.ui.component.BlueButton
+import com.glassbar.ssh.ui.theme.LocalEnableBlur
+import com.glassbar.ssh.ui.util.BlurredBar
+import com.glassbar.ssh.ui.util.rememberBlurBackdrop
+import top.yukonga.miuix.kmp.blur.layerBackdrop
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextField
 import top.yukonga.miuix.kmp.basic.Icon
-import com.glassbar.ssh.ui.component.BlueButton
 import com.glassbar.ssh.ui.theme.isInDarkTheme
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
@@ -214,10 +222,13 @@ fun SshScreen(
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
+        val density = LocalDensity.current
+        val imeBottom = with(density) { WindowInsets.ime.getBottom(density).toDp() }
+        val actualBottomPadding = androidx.compose.ui.unit.max(bottomPadding, imeBottom)
+
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(bottom = bottomPadding)
                 .background(MiuixTheme.colorScheme.surfaceContainer),
         ) {
         // Connection form (visible when not connected)
@@ -229,6 +240,7 @@ fun SshScreen(
             Column(
                 modifier = Modifier
                     .fillMaxSize()
+                    .padding(bottom = actualBottomPadding)
                     .padding(16.dp)
                     .verticalScroll(rememberScrollState()),
             ) {
@@ -459,99 +471,115 @@ fun SshScreen(
             }
         }
 
+        val enableBlur = LocalEnableBlur.current
+        val backdrop = rememberBlurBackdrop(enableBlur)
+
         // Terminal (visible when connected)
         AnimatedVisibility(
             visible = isConnected,
             enter = fadeIn(),
             exit = fadeOut(),
         ) {
-            Column(
+            Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(MiuixTheme.colorScheme.surface)
+                    .background(MiuixTheme.colorScheme.surfaceContainer)
             ) {
-                // Modernized App Bar
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(MiuixTheme.colorScheme.surfaceContainer.copy(alpha = 0.8f))
-                        .padding(horizontal = 16.dp, vertical = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
+                // The Terminal Content (Behind the top bar)
+                Box(
+                    modifier = if (backdrop != null) Modifier.layerBackdrop(backdrop) else Modifier
                 ) {
-                    // Connection Indicator
-                    Box(
-                        modifier = Modifier
-                            .size(10.dp)
-                            .clip(RoundedCornerShape(5.dp))
-                            .background(Color(0xFF4CAF50)) // Green for connected
-                    )
-                    Spacer(Modifier.width(12.dp))
-                    Row(modifier = Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            text = username,
-                            color = Color(0xFF4CAF50),
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.Bold,
-                        )
-                        Text(
-                            text = "@${host}",
-                            color = textColor,
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                    
-                    // Tools
-                    Icon(
-                        imageVector = Icons.Rounded.Remove,
-                        contentDescription = "Zoom Out",
-                        tint = secondaryTextColor,
-                        modifier = Modifier
-                            .size(24.dp)
-                            .clickable { terminalFontScale = (terminalFontScale - 0.1f).coerceAtLeast(0.5f) },
-                    )
-                    Spacer(Modifier.width(16.dp))
-                    Icon(
-                        imageVector = Icons.Rounded.Add,
-                        contentDescription = "Zoom In",
-                        tint = secondaryTextColor,
-                        modifier = Modifier
-                            .size(24.dp)
-                            .clickable { terminalFontScale = (terminalFontScale + 0.1f).coerceAtMost(3.0f) },
-                    )
-                    Spacer(Modifier.width(16.dp))
-                    Icon(
-                        imageVector = Icons.Rounded.Delete,
-                        contentDescription = "Clear",
-                        tint = secondaryTextColor,
-                        modifier = Modifier
-                            .size(22.dp)
-                            .clickable {
-                                terminalState.clear()
-                                sshSession.send("\u000C")
-                            },
-                    )
-                    Spacer(Modifier.width(16.dp))
-                    Icon(
-                        imageVector = Icons.Rounded.PowerSettingsNew,
-                        contentDescription = stringResource(R.string.action_disconnect),
-                        tint = MiuixTheme.colorScheme.error,
-                        modifier = Modifier
-                            .size(24.dp)
-                            .clickable { sshViewModel.disconnect() },
+                    TerminalConsoleView(
+                        terminalState = terminalState,
+                        onSendInput = { key -> sshSession.send(key) },
+                        fontScale = terminalFontScale,
+                        isDark = isInDarkTheme(),
+                        modifier = Modifier.fillMaxSize(),
+                        bottomPadding = actualBottomPadding,
+                        topPadding = 48.dp, // Height of the App Bar
                     )
                 }
 
-                // The New Compose Terminal Console View
-                TerminalConsoleView(
-                    terminalState = terminalState,
-                    onSendInput = { key -> sshSession.send(key) },
-                    fontScale = terminalFontScale,
-                    isDark = isInDarkTheme(),
-                    modifier = Modifier.fillMaxSize().weight(1f),
-                )
+                // The Glass Top Bar
+                BlurredBar(
+                    backdrop = backdrop,
+                    blurActive = true,
+                ) {
+                    val fallbackColor = MiuixTheme.colorScheme.surfaceContainer.copy(alpha = 0.85f)
+                    val topBarColor = if (backdrop != null) Color.Transparent else fallbackColor
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(topBarColor)
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        // Connection Indicator
+                        Box(
+                            modifier = Modifier
+                                .size(10.dp)
+                                .clip(RoundedCornerShape(5.dp))
+                                .background(Color(0xFF4CAF50)) // Green for connected
+                        )
+                        Spacer(Modifier.width(12.dp))
+                        Row(modifier = Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = username,
+                                color = Color(0xFF4CAF50),
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold,
+                            )
+                            Text(
+                                text = "@${host}",
+                                color = textColor,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                        
+                        // Tools
+                        Icon(
+                            imageVector = Icons.Rounded.Remove,
+                            contentDescription = "Zoom Out",
+                            tint = secondaryTextColor,
+                            modifier = Modifier
+                                .size(24.dp)
+                                .clickable { terminalFontScale = (terminalFontScale - 0.1f).coerceAtLeast(0.5f) },
+                        )
+                        Spacer(Modifier.width(16.dp))
+                        Icon(
+                            imageVector = Icons.Rounded.Add,
+                            contentDescription = "Zoom In",
+                            tint = secondaryTextColor,
+                            modifier = Modifier
+                                .size(24.dp)
+                                .clickable { terminalFontScale = (terminalFontScale + 0.1f).coerceAtMost(3.0f) },
+                        )
+                        Spacer(Modifier.width(16.dp))
+                        Icon(
+                            imageVector = Icons.Rounded.Delete,
+                            contentDescription = "Clear",
+                            tint = secondaryTextColor,
+                            modifier = Modifier
+                                .size(22.dp)
+                                .clickable {
+                                    terminalState.clear()
+                                    sshSession.send("\u000C")
+                                },
+                        )
+                        Spacer(Modifier.width(16.dp))
+                        Icon(
+                            imageVector = Icons.Rounded.PowerSettingsNew,
+                            contentDescription = stringResource(R.string.action_disconnect),
+                            tint = MiuixTheme.colorScheme.error,
+                            modifier = Modifier
+                                .size(24.dp)
+                                .clickable { sshViewModel.disconnect() },
+                        )
+                    }
+                }
             }
         }
         }
