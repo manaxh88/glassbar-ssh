@@ -58,6 +58,13 @@ import com.glassbar.ssh.ui.viewmodel.MainActivityViewModel
 import com.glassbar.ssh.ui.viewmodel.MainPagerConfig
 import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+import com.glassbar.ssh.ui.screen.ssh.SshViewModel
+import com.glassbar.ssh.ui.screen.ssh.SshConnectionState
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import top.yukonga.miuix.kmp.blur.layerBackdrop
 import top.yukonga.miuix.kmp.blur.rememberLayerBackdrop
 
@@ -213,13 +220,24 @@ fun MainScreen(
             }
         }
 
+        val sshViewModel = viewModel<SshViewModel>()
+        val connectionState by sshViewModel.session.state.collectAsStateWithLifecycle()
+        val isConnected = connectionState == SshConnectionState.CONNECTED
+        val isShellView = mainPagerState.selectedPage == 1 && isConnected
+
         val bottomBar = @Composable {
-            Box(modifier = Modifier.fillMaxWidth()) {
-                BottomBar(
-                    blurBackdrop = blurBackdrop,
-                    backdrop = backdrop,
-                    modifier = Modifier.align(Alignment.BottomCenter),
-                )
+            AnimatedVisibility(
+                visible = !isShellView,
+                enter = fadeIn() + slideInVertically { it },
+                exit = fadeOut() + slideOutVertically { it },
+            ) {
+                Box(modifier = Modifier.fillMaxWidth()) {
+                    BottomBar(
+                        blurBackdrop = blurBackdrop,
+                        backdrop = backdrop,
+                        modifier = Modifier.align(Alignment.BottomCenter),
+                    )
+                }
             }
         }
 

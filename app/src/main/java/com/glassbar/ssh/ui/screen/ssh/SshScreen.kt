@@ -52,6 +52,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -78,6 +79,8 @@ import top.yukonga.miuix.kmp.basic.TextField
 import top.yukonga.miuix.kmp.basic.Icon
 import com.glassbar.ssh.ui.theme.isInDarkTheme
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+import top.yukonga.miuix.kmp.icon.MiuixIcons
+import top.yukonga.miuix.kmp.icon.extended.Back
 
 @Composable
 fun SshScreen(
@@ -88,7 +91,17 @@ fun SshScreen(
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val focusManager = LocalFocusManager.current
+    val keyboardController = LocalSoftwareKeyboardController.current
+    val mainPagerState = LocalMainPagerState.current
 
+    LaunchedEffect(mainPagerState.selectedPage) {
+        if (mainPagerState.selectedPage != 1) {
+            focusManager.clearFocus()
+            keyboardController?.hide()
+        }
+    }
+
+    var connectionName by remember { mutableStateOf("") }
     var host by remember { mutableStateOf("") }
     var port by remember { mutableStateOf("22") }
     var username by remember { mutableStateOf("") }
@@ -147,6 +160,17 @@ fun SshScreen(
     // Populate a selected profile and auto-connect only when it contains usable credentials.
     LaunchedEffect(initialConnection?.id) {
         val connection = initialConnection ?: return@LaunchedEffect
+        connectionName = connection.name
+
+        val isSameConnection = (host.trim() == connection.host.trim() &&
+                port.trim() == connection.port.toString() &&
+                username.trim() == connection.username.trim())
+
+        if (isConnected && isSameConnection) {
+            onConsumed()
+            return@LaunchedEffect
+        }
+
         host = connection.host
         port = connection.port.toString()
         username = connection.username
@@ -207,7 +231,6 @@ fun SshScreen(
         }
     }
 
-    val mainPagerState = LocalMainPagerState.current
     LaunchedEffect(connectionState, hostKeyStatus) {
         mainPagerState.isScrollLocked = isConnected
         if (isConnected) {
@@ -474,6 +497,35 @@ fun SshScreen(
         val enableBlur = LocalEnableBlur.current
         val backdrop = rememberBlurBackdrop(enableBlur)
 
+        var ctrlActive by remember { mutableStateOf(false) }
+        var altActive by remember { mutableStateOf(false) }
+
+        val handleInput = { key: String ->
+            var currentInput = key
+            if (ctrlActive && currentInput.length == 1) {
+                val char = currentInput[0]
+                if (char in 'a'..'z') {
+                    currentInput = (char - 'a' + 1).toChar().toString()
+                } else if (char in 'A'..'Z') {
+                    currentInput = (char - 'A' + 1).toChar().toString()
+                } else if (char == '[') {
+                    currentInput = 27.toChar().toString()
+                } else if (char == ']') {
+                    currentInput = 29.toChar().toString()
+                } else if (char == '\\') {
+                    currentInput = 28.toChar().toString()
+                } else if (char == '_') {
+                    currentInput = 31.toChar().toString()
+                }
+                ctrlActive = false
+            }
+            if (altActive) {
+                currentInput = "\u001b$currentInput"
+                altActive = false
+            }
+            sshSession.send(currentInput)
+        }
+
         // Terminal (visible when connected)
         AnimatedVisibility(
             visible = isConnected,
@@ -491,11 +543,11 @@ fun SshScreen(
                 ) {
                     TerminalConsoleView(
                         terminalState = terminalState,
-                        onSendInput = { key -> sshSession.send(key) },
+                        onSendInput = handleInput,
                         fontScale = terminalFontScale,
                         isDark = isInDarkTheme(),
                         modifier = Modifier.fillMaxSize(),
-                        bottomPadding = actualBottomPadding,
+                        bottomPadding = actualBottomPadding + 96.dp,
                         topPadding = 48.dp, // Height of the App Bar
                     )
                 }
@@ -514,6 +566,21 @@ fun SshScreen(
                             .padding(horizontal = 16.dp, vertical = 12.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
+                        // Back Button to return to Servers tab
+                        Icon(
+                            imageVector = MiuixIcons.Back,
+                            contentDescription = "Back",
+                            tint = textColor,
+                            modifier = Modifier
+                                .size(24.dp)
+                                .clickable {
+                                    focusManager.clearFocus()
+                                    keyboardController?.hide()
+                                    scope.launch { mainPagerState.animateToPage(0) }
+                                },
+                        )
+                        Spacer(Modifier.width(12.dp))
+
                         // Connection Indicator
                         Box(
                             modifier = Modifier
@@ -523,20 +590,31 @@ fun SshScreen(
                         )
                         Spacer(Modifier.width(12.dp))
                         Row(modifier = Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                text = username,
-                                color = Color(0xFF4CAF50),
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.Bold,
-                            )
-                            Text(
-                                text = "@${host}",
-                                color = textColor,
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
+                            if (connectionName.isNotBlank()) {
+                                Text(
+                                    text = connectionName,
+                                    color = textColor,
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            } else {
+                                Text(
+                                    text = username,
+                                    color = Color(0xFF4CAF50),
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Bold,
+                                )
+                                Text(
+                                    text = "@${host}",
+                                    color = textColor,
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
                         }
                         
                         // Tools
@@ -577,6 +655,29 @@ fun SshScreen(
                             modifier = Modifier
                                 .size(24.dp)
                                 .clickable { sshViewModel.disconnect() },
+                        )
+                    }
+                }
+
+                // The Virtual Keys (floating above keyboard)
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(bottom = actualBottomPadding)
+                ) {
+                    BlurredBar(
+                        backdrop = backdrop,
+                        blurActive = true,
+                    ) {
+                        val fallbackColor = MiuixTheme.colorScheme.surfaceContainer.copy(alpha = 0.85f)
+                        val barColor = if (backdrop != null) Color.Transparent else fallbackColor
+                        VirtualKeysView(
+                            modifier = Modifier.background(barColor),
+                            ctrlActive = ctrlActive,
+                            altActive = altActive,
+                            onCtrlToggle = { ctrlActive = !ctrlActive },
+                            onAltToggle = { altActive = !altActive },
+                            onKeyPress = handleInput
                         )
                     }
                 }

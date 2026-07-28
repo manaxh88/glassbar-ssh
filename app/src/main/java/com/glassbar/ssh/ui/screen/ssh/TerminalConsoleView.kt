@@ -19,10 +19,14 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.ime
-import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -36,34 +40,31 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.compose.foundation.gestures.awaitEachGesture
-import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.ui.input.pointer.PointerEventPass
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.dp
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.basic.Text
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun TerminalConsoleView(
     terminalState: TerminalState,
+    isDark: Boolean,
+    fontScale: Float,
     onSendInput: (String) -> Unit,
     modifier: Modifier = Modifier,
-    fontScale: Float = 1f,
-    isDark: Boolean = true,
     bottomPadding: Dp = 0.dp,
     topPadding: Dp = 0.dp,
 ) {
     val lines by terminalState.textLines.collectAsStateWithLifecycle()
+    val cursorPosition by terminalState.cursorPosition.collectAsStateWithLifecycle()
     val listState = rememberLazyListState()
+    val scrollState = rememberScrollState()
     val terminalInputView = remember { mutableStateOf<TerminalInputView?>(null) }
 
     // Blinking Block Cursor Animation
@@ -82,18 +83,20 @@ fun TerminalConsoleView(
         terminalState.isDarkTheme = isDark
     }
 
-    // Auto-scroll to bottom when new log lines arrive or font scale changes
+    val isAltScreen by terminalState.isAltScreen.collectAsStateWithLifecycle()
+
+    // Auto-scroll to cursor when new log lines arrive or font scale changes
     LaunchedEffect(lines.size, fontScale) {
-        if (lines.isNotEmpty()) {
-            listState.animateScrollToItem(lines.size - 1)
+        if (lines.isNotEmpty() && !isAltScreen) {
+            listState.animateScrollToItem(cursorPosition.second)
         }
     }
 
-    // Auto-scroll to bottom when keyboard (IME) opens
+    // Auto-scroll to cursor when keyboard (IME) opens
     val imeBottom = WindowInsets.ime.getBottom(LocalDensity.current)
     LaunchedEffect(imeBottom) {
-        if (imeBottom > 0 && lines.isNotEmpty()) {
-            listState.animateScrollToItem(lines.size - 1)
+        if (imeBottom > 0 && lines.isNotEmpty() && !isAltScreen) {
+            listState.animateScrollToItem(cursorPosition.second)
         }
     }
 
@@ -105,6 +108,7 @@ fun TerminalConsoleView(
     val bgColor = MiuixTheme.colorScheme.surfaceContainer
     val textColor = if (isDark) Color(0xFFE7E7E7) else Color(0xFF1A1A1A)
     val cursorColor = if (isDark) Color(0xFF50FA7B) else Color(0xFF2E7D32)
+    val cursorTextColor = if (isDark) Color.Black else Color.White
     val baseFontSize = (14 * fontScale).sp
 
     Column(
@@ -140,33 +144,47 @@ fun TerminalConsoleView(
                     .alpha(0.01f)
             )
 
-            SelectionContainer {
-                LazyColumn(
-                    state = listState,
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(top = topPadding, bottom = bottomPadding),
-                ) {
-                    if (lines.isEmpty()) {
-                        item {
-                            Text(
-                                text = buildAnnotatedString {
-                                    withStyle(SpanStyle(color = cursorColor.copy(alpha = cursorAlpha), fontWeight = FontWeight.Bold)) {
-                                        append("▋")
-                                    }
-                                },
-                                fontFamily = FontFamily.Monospace,
-                                fontSize = baseFontSize,
-                                lineHeight = (18 * fontScale).sp,
-                                modifier = Modifier.fillMaxWidth(),
-                            )
-                        }
-                    } else {
+            BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+                val density = LocalDensity.current
+                // We use 0.6f as a safe multiplier for monospaced fonts to ensure we don't 
+                // overestimate columns. Overestimating causes Compose to soft-wrap the text or clip it.
+                val charWidthDp = with(density) { (baseFontSize.toPx() * 0.6f).toDp() }
+                val charHeightDp = with(density) { (18 * fontScale).sp.toDp() }
+
+                val availableWidth = maxWidth
+                // We subtract topPadding and bottomPadding to get the actual viewable terminal height
+                val availableHeight = maxHeight - topPadding - bottomPadding
+
+                val newCols = maxOf(10, minOf(500, (availableWidth / charWidthDp).toInt()))
+                val newRows = maxOf(5, minOf(500, (availableHeight / charHeightDp).toInt()))
+
+                LaunchedEffect(newCols, newRows) {
+                    terminalState.resize(newCols, newRows)
+                }
+
+                SelectionContainer {
+                    LazyColumn(
+                        state = listState,
+                        modifier = Modifier.fillMaxSize().padding(bottom = bottomPadding),
+                        contentPadding = PaddingValues(top = topPadding),
+                    ) {
                         itemsIndexed(lines) { index, line ->
-                            val lineText = if (index == lines.size - 1) {
+                            val lineText = if (index == cursorPosition.second) {
+                                val cx = cursorPosition.first
                                 buildAnnotatedString {
-                                    append(line)
-                                    withStyle(SpanStyle(color = cursorColor.copy(alpha = cursorAlpha), fontWeight = FontWeight.Bold)) {
-                                        append("▋")
+                                    val textLen = line.length
+                                    if (cx >= textLen) {
+                                        append(line)
+                                        append(" ".repeat(cx - textLen))
+                                        withStyle(SpanStyle(background = cursorColor.copy(alpha = cursorAlpha))) {
+                                            append(" ")
+                                        }
+                                    } else {
+                                        append(line.subSequence(0, cx))
+                                        withStyle(SpanStyle(background = cursorColor.copy(alpha = cursorAlpha), color = cursorTextColor)) {
+                                            append(line.subSequence(cx, cx + 1))
+                                        }
+                                        append(line.subSequence(cx + 1, textLen))
                                     }
                                 }
                             } else {

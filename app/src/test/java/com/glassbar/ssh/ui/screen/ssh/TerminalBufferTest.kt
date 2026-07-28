@@ -138,6 +138,35 @@ class TerminalBufferTest {
     }
 
     @Test
+    fun `BEL after a non-ST escape inside OSC terminates the sequence instead of getting stuck`() {
+        val buffer = TerminalBuffer(rows = 2, cols = 8)
+
+        buffer.write("\u001B]0;title\u001B\u0007OK")
+
+        assertEquals("OK", buffer.renderedLines().first())
+    }
+
+    @Test
+    fun `non-ASCII code points inside an OSC payload stay in the OSC and do not render`() {
+        val buffer = TerminalBuffer(rows = 2, cols = 8)
+
+        buffer.write("\u001B]0;\u00E9\u0007OK")
+
+        assertEquals("\u00E9", buffer.getTitle())
+        assertEquals("OK", buffer.renderedLines().first())
+    }
+
+    @Test
+    fun `OSC title preserves supplementary code points instead of truncating them`() {
+        val buffer = TerminalBuffer(rows = 2, cols = 8)
+
+        buffer.write("\u001B]0;\uD83D\uDE00\u0007OK")
+
+        assertEquals("\uD83D\uDE00", buffer.getTitle())
+        assertEquals("OK", buffer.renderedLines().first())
+    }
+
+    @Test
     fun `SGR supports true color and trailing empty reset`() {
         val buffer = TerminalBuffer(rows = 2, cols = 8)
         buffer.write("\u001B[38;2;12;34;56;48;2;78;90;123mA\u001B[31;mB")
@@ -210,10 +239,90 @@ class TerminalBufferTest {
         assertEquals(TerminalColors.DEFAULT_FG, cell.fg)
     }
 
+    @Test
+    fun `clear leaves a fresh main screen after alternate-screen output`() {
+        val buffer = TerminalBuffer(rows = 2, cols = 8)
+        buffer.write("main\u001B[?1049h\u001B[31malt")
+
+        buffer.clear()
+        buffer.write("fresh\u001B[?1049l")
+
+        assertFalse(buffer.snapshot().isAlternateScreen)
+        assertEquals("fresh", buffer.renderedLines().first())
+        assertEquals(TerminalColors.DEFAULT_FG, buffer.visibleRows()[0][0].fg)
+    }
+
+    @Test
+    fun `alternate screen is isolated from main screen and restores cursor on 1049`() {
+        val buffer = TerminalBuffer(rows = 2, cols = 8)
+        buffer.write("main1\r\n\u001B[1;3H")
+
+        buffer.write("\u001B[?1049h")
+        assertTrue(buffer.snapshot().isAlternateScreen)
+        assertEquals(listOf("", ""), buffer.renderedLines())
+        buffer.write("alt1")
+
+        buffer.write("\u001B[?1049l")
+        assertFalse(buffer.snapshot().isAlternateScreen)
+        assertEquals(listOf("main1", ""), buffer.renderedLines())
+        assertEquals(0, buffer.cursorRow)
+        assertEquals(2, buffer.cursorCol)
+    }
+
+    @Test
+    fun `resize while alternate screen is active also resizes main screen`() {
+        val buffer = TerminalBuffer(rows = 2, cols = 8)
+        buffer.write("mainline")
+
+        buffer.write("\u001B[?1049h")
+        buffer.resize(newRows = 3, newCols = 10)
+        buffer.write("\u001B[?1049l")
+
+        assertEquals(3, buffer.rows)
+        assertEquals(10, buffer.cols)
+        assertEquals("mainline", buffer.renderedLines().first())
+    }
+
+    @Test
+    fun `oversized incomplete control sequences recover without retaining payload`() {
+        val buffer = TerminalBuffer(rows = 2, cols = 8)
+
+        repeat(4) {
+            buffer.write("\u001B]0;${"x".repeat(5000)}")
+            buffer.write("\u0007")
+            buffer.write("\u001B[${"9".repeat(100)}m")
+        }
+        buffer.write("OK")
+
+        assertEquals("OK", buffer.renderedLines().first())
+        assertEquals("", buffer.getTitle())
+    }
+
+    @Test
+    fun `xterm 256 color cube maps intermediate component values`() {
+        assertEquals(0xFF00005F.toInt(), TerminalColors.fg(17))
+        assertEquals(0xFF5F5F5F.toInt(), TerminalColors.fg(59))
+        assertEquals(0xFFD7D7D7.toInt(), TerminalColors.fg(188))
+    }
+
+    @Test
+    fun `emoji and combining marks occupy terminal cells by code point`() {
+        val buffer = TerminalBuffer(rows = 2, cols = 6)
+        buffer.write("A\uD83D\uDE00e\u0301B")
+
+        val row = buffer.visibleRows()[0]
+        assertEquals("A", row[0].text)
+        assertEquals("\uD83D\uDE00", row[1].text)
+        assertTrue(row[2].wideContinuation)
+        assertEquals("e\u0301", row[3].text)
+        assertEquals("B", row[4].text)
+        assertEquals(5, buffer.cursorCol)
+    }
+
     private fun TerminalBuffer.renderedLines(): List<String> = visibleRows().map { row ->
         buildString {
             row.forEach { cell ->
-                if (!cell.wideContinuation) append(cell.char)
+                if (!cell.wideContinuation) append(cell.text)
             }
         }.trimEnd()
     }

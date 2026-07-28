@@ -167,23 +167,33 @@ class SshSession(
                 return@withContext
             }
 
-            // Request a pseudo-terminal
-            shellChannel.setPtySize(80, 24, 640, 384)
+            // Request a pseudo-terminal with current dimensions
+            val initialCols = terminalState.currentCols
+            val initialRows = terminalState.currentRows
+            shellChannel.setPtySize(initialCols, initialRows, initialCols * 8, initialRows * 16)
             shellChannel.setPtyType("xterm-256color")
 
+            var resizeJob: kotlinx.coroutines.Job? = null
+            terminalState.onPtyResize = { cols, rows ->
+                resizeJob?.cancel()
+                resizeJob = ioScope.launch {
+                    kotlinx.coroutines.delay(200)
+                    try {
+                        shellChannel.setPtySize(cols, rows, cols * 8, rows * 16)
+                    } catch (e: Exception) {
+                        // Ignore if channel is not fully connected or closed
+                    }
+                }
+            }
+
+            val shellInput = shellChannel.inputStream
             val shellOutput = shellChannel.outputStream
             if (!installOutputStream(generation, shellOutput)) {
                 shellChannel.disconnect()
                 sshSession.disconnect()
                 return@withContext
             }
-            shellChannel.connect(SHELL_CONNECT_TIMEOUT_MS)
-            if (connectionGeneration.get() != generation) {
-                shellChannel.disconnect()
-                sshSession.disconnect()
-                return@withContext
-            }
-            val shellInput = shellChannel.inputStream
+
             val writerQueue = Channel<ByteArray>(Channel.BUFFERED)
             val sshReader = Thread {
                 val buf = CharArray(4096)
@@ -242,6 +252,13 @@ class SshSession(
             }
             startWriter(writerScope, generation, writerQueue, shellOutput)
             sshReader.start()
+
+            shellChannel.connect(SHELL_CONNECT_TIMEOUT_MS)
+            if (connectionGeneration.get() != generation) {
+                shellChannel.disconnect()
+                sshSession.disconnect()
+                return@withContext
+            }
 
         } catch (cancelled: CancellationException) {
             connectingChannel?.runCatching { disconnect() }
